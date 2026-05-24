@@ -21,40 +21,75 @@ The scripts in this repo keep `~/.agents` pointed at this workspace so Codex can
 - `setup-agents.sh`: link local `superpowers-agents` to `~/.agents`
 - `setup-superpowers-fork.sh`: clone/update fork and sync skills
 - `update-skills.sh`: pull latest upstream skills and reapply custom skills
+- `install-global-rules.sh`: link one shared global rules file into multiple CLI config locations
+- `sync-agents.sh`: one command for fresh install or updates (always updates both skills and global rules)
 
-## Quick Start
+## Quick Start (Single Command)
 
 1. Clone this repo.
 2. From repo root, run:
 
 ```bash
-./setup-superpowers-fork.sh
+./sync-agents.sh
 ```
 
 This will:
-- clone or update `superpowers-fork`
+- run first-time setup if needed (`superpowers-fork` clone + initial sync)
+- always update skills from upstream and reapply custom skills
+- always update global rules links across configured CLIs
 - copy fork skills into `superpowers-agents/skills`
 - copy `custom/skills/*` into `superpowers-agents/skills`
-- create `~/.agents -> <this-repo>/superpowers-agents` (with backup if `~/.agents` exists)
+- create/refresh `~/.agents -> <this-repo>/superpowers-agents`
 
 ## Daily Update Flow
 
-Run:
+Recommended:
 
 ```bash
-./update-skills.sh
+./sync-agents.sh
 ```
 
 This will:
-- fetch latest `upstream/main` in `superpowers-fork`
-- reset local fork mirror to that upstream state
-- refresh `superpowers-agents/skills`
-- reapply `custom/skills/*`
-- refresh the `~/.agents` symlink
+- always run skill updates and global rules updates in one pass
+
+Manual mode (if needed):
+
+```bash
+./update-skills.sh
+./install-global-rules.sh
+```
 
 If `~/.agents` already exists, the script prompts:
 - `y`: backup first to `~/.agents.backup.<timestamp>`
 - `N` or Enter: do not backup and override existing `~/.agents` (default)
+
+## Global Rules Across CLIs
+
+Canonical global rules file in this repo:
+
+```text
+shared/rules/global_rules.md
+```
+
+Install for configured CLIs:
+
+```bash
+./install-global-rules.sh
+```
+
+This script creates symlinks (with automatic backups if a target file exists) for:
+- `~/.codex/AGENTS.md`
+- `~/.claude/CLAUDE.md`
+- `~/.gemini/GEMINI.md`
+- `~/.codeium/windsurf/memories/global_rules.md`
+- `~/.antigravity/AGENTS.md`
+- `~/.devin/AGENTS.md`
+
+New device flow:
+1. Pull this repository.
+2. Run `./sync-agents.sh`
+
+Any future edits to `shared/rules/global_rules.md` immediately apply to all linked CLIs.
 
 ## Add or Override a Skill
 

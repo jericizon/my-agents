@@ -58,8 +58,13 @@ echo "Updating global .agents symlink..."
 # Handle existing target
 if [ -e "$TARGET_LINK" ] || [ -L "$TARGET_LINK" ]; then
     echo "Found existing global .agents at: $TARGET_LINK"
-    read -r -p "Backup existing .agents first? [y/N]: " BACKUP_AGENTS
-    BACKUP_AGENTS="${BACKUP_AGENTS:-N}"
+    if [ -t 0 ]; then
+        read -r -p "Backup existing .agents first? [y/N]: " BACKUP_AGENTS
+        BACKUP_AGENTS="${BACKUP_AGENTS:-N}"
+    else
+        BACKUP_AGENTS="N"
+        echo "Non-interactive mode detected. Defaulting to: N"
+    fi
 
     if [[ "$BACKUP_AGENTS" =~ ^[Yy]$ ]]; then
         BACKUP="${TARGET_LINK}.backup.$(date +%s)"
