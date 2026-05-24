@@ -55,11 +55,20 @@ git log --oneline -1
 echo ""
 echo "Updating global .agents symlink..."
 
-# Backup existing target
+# Handle existing target
 if [ -e "$TARGET_LINK" ] || [ -L "$TARGET_LINK" ]; then
-    BACKUP="${TARGET_LINK}.backup.$(date +%s)"
-    echo "Backing up existing target to: $BACKUP"
-    mv "$TARGET_LINK" "$BACKUP"
+    echo "Found existing global .agents at: $TARGET_LINK"
+    read -r -p "Backup existing .agents first? [y/N]: " BACKUP_AGENTS
+    BACKUP_AGENTS="${BACKUP_AGENTS:-N}"
+
+    if [[ "$BACKUP_AGENTS" =~ ^[Yy]$ ]]; then
+        BACKUP="${TARGET_LINK}.backup.$(date +%s)"
+        echo "Backing up existing target to: $BACKUP"
+        mv "$TARGET_LINK" "$BACKUP"
+    else
+        echo "Overriding existing target..."
+        rm -rf "$TARGET_LINK"
+    fi
 fi
 
 # Create symlink
