@@ -53,13 +53,13 @@ fi
 # Copy skills from fork to superpowers-agents/skills
 echo "Copying skills from fork to superpowers-agents/skills..."
 rm -rf "$SKILLS_DIR"/*
-cp -r "$FORK_DIR/skills/"* "$SKILLS_DIR/"
+cp -r "$FORK_DIR/skills/." "$SKILLS_DIR/"
 
 # Copy custom skills if they exist
 CUSTOM_SKILLS_DIR="$SCRIPT_DIR/custom/skills"
 if [ -d "$CUSTOM_SKILLS_DIR" ] && [ "$(ls -A $CUSTOM_SKILLS_DIR)" ]; then
     echo "Copying custom skills..."
-    cp -r "$CUSTOM_SKILLS_DIR"/* "$SKILLS_DIR/"
+    cp -r "$CUSTOM_SKILLS_DIR/." "$SKILLS_DIR/"
 fi
 
 echo ""
