@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FORK_DIR="$SCRIPT_DIR/superpowers-fork"
 SKILLS_DIR="$SCRIPT_DIR/superpowers-agents/skills"
 AGENTS_DIR="$SCRIPT_DIR/superpowers-agents"
 TARGET_LINK="$HOME/.agents"
+UPSTREAM_REPO="https://github.com/obra/superpowers.git"
 
 echo "Updating skills from obra/superpowers fork..."
 
@@ -18,6 +19,22 @@ if [ ! -d "$FORK_DIR" ]; then
 fi
 
 cd "$FORK_DIR"
+
+ensure_upstream_remote() {
+    if git remote get-url upstream >/dev/null 2>&1; then
+        return
+    fi
+
+    remote_url="$UPSTREAM_REPO"
+    if git remote get-url origin >/dev/null 2>&1; then
+        remote_url="$(git remote get-url origin)"
+    fi
+
+    echo "Remote 'upstream' is missing. Adding: $remote_url"
+    git remote add upstream "$remote_url"
+}
+
+ensure_upstream_remote
 
 # Fetch latest from upstream
 echo "Fetching upstream..."

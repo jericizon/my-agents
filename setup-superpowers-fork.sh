@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FORK_DIR="$SCRIPT_DIR/superpowers-fork"
@@ -11,10 +11,25 @@ UPSTREAM_REPO="https://github.com/obra/superpowers.git"
 
 echo "Setting up superpowers fork in: $FORK_DIR"
 
+ensure_upstream_remote() {
+    if git remote get-url upstream >/dev/null 2>&1; then
+        return
+    fi
+
+    remote_url="$UPSTREAM_REPO"
+    if git remote get-url origin >/dev/null 2>&1; then
+        remote_url="$(git remote get-url origin)"
+    fi
+
+    echo "Remote 'upstream' is missing. Adding: $remote_url"
+    git remote add upstream "$remote_url"
+}
+
 # Create fork directory
 if [ -d "$FORK_DIR" ]; then
     echo "Fork directory already exists. Updating..."
     cd "$FORK_DIR"
+    ensure_upstream_remote
     git fetch upstream
 else
     echo "Cloning superpowers repository..."
