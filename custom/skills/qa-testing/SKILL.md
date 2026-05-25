@@ -1,6 +1,6 @@
 ---
 name: qa-testing
-description: Use when validating features and validating production readiness. Orchestrates the full QA lifecycle by delegating to sub-skills: qa-planning (inspect codebase, scan pages, create QA plan), qa-execution (generate/run Playwright E2E tests, check links/spelling, fix failures), and qa-documentation (document test cases, produce final report, verify completion gate). Invoke this skill first; it will guide you through the sub-skills.
+description: Use when performing QA or testing work that needs structured planning, end-to-end execution, failure investigation, and final QA sign-off.
 ---
 
 # QA Testing Orchestrator
