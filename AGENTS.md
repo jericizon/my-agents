@@ -27,6 +27,13 @@ Run from repository root unless noted.
 - Required entrypoint: `SKILL.md` in each skill directory.
 - Script names: verb-first kebab-case (`update-skills.sh`, `run-skill-tests.sh`).
 
+## Implementation Rules
+- Before changing code, scan the relevant codebase paths and confirm the target code exists.
+- When creating or modifying code, make it reusable by default.
+- Prefer the smallest reusable change that matches current patterns.
+- Avoid new abstractions unless existing repetition proves they are needed.
+- Choose simple code over clever code; no overengineering.
+
 ## Testing Guidelines
 - Prefer targeted tests first, then integration tests before PR.
 - Keep test filenames explicit: `test-<behavior>.sh` or `<component>.test.js`.

@@ -12,6 +12,14 @@ description: Global engineering and safety rules for all repositories
 4. **Quality gates** — Task incomplete without: passing meaningful tests, met acceptance criteria, zero HIGH severity issues.
 5. **Security baseline** — Auth, payments, admin, webhooks, wallets, and protected data are HIGH RISK by default.
 
+## IMPLEMENTATION DEFAULTS
+
+- Before any code change, scan the relevant code paths first.
+- Do not modify or invent code blindly; confirm the target code exists before changing it.
+- Prefer the smallest reusable solution that fits existing patterns.
+- Reuse existing modules, helpers, and conventions before adding new abstractions.
+- Reject speculative flexibility, premature abstraction, and clever but unnecessary code.
+
 ---
 
 ## REQUEST WORKFLOW
