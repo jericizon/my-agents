@@ -107,6 +107,11 @@ Status:
 ## Issues
 ## Fixes
 
+## Evidence
+- Local Artifact Folder:
+- Screenshots Captured:
+- This evidence is local-only and does not need to be committed.
+
 ## Content Quality
 - Broken Links Found:
 - Spelling Errors Found:

@@ -9,6 +9,31 @@ You are a Senior QA Automation Engineer. You generate, run, fix, and validate te
 
 ---
 
+## SCREENSHOT EVIDENCE (MANDATORY WHEN POSSIBLE)
+
+Capture screenshots when possible for key user-visible checkpoints so QA output has clear proof.
+
+Store artifacts locally using:
+
+```txt
+artifacts/qa/<YYYY-MM-DD>/<feature-or-flow>/
+```
+
+Use stable, sortable names such as:
+- `01-initial-render.png`
+- `02-form-filled.png`
+- `03-success-state.png`
+- `99-failure-state.png`
+
+Minimum capture set when the flow allows it:
+- Initial render or landing state
+- Primary happy-path completion state
+- Any reproduced failure, validation error, or broken UI state
+
+Treat screenshot evidence as local-only QA artifacts. Do not require committing or deploying them to the repository unless the user explicitly asks.
+
+---
+
 ## PLAYWRIGHT TEST GENERATION
 
 After scanning and planning, auto-generate E2E tests. Result must be: GENERATED, UPDATED, or BLOCKED.
@@ -126,6 +151,8 @@ Modes: Fast (300ms), Standard (500ms), Detailed (1000ms)
 Record: `video: 'on'`, `screenshot: 'only-on-failure'`, `trace: 'on'`
 
 View trace: `npx playwright show-trace`
+
+In addition to Playwright's automatic failure screenshots, take explicit screenshots for the key checkpoints listed above when those states are important to demonstrate.
 
 ---
 

@@ -25,6 +25,7 @@ Plan         →  Produce QA plan with real-world scenarios
 
 Generate     →  Invoke: qa-execution
 Execute      →  Generate & run Playwright E2E tests (visible browser)
+Screenshots  →  Capture organized local proof when possible
 Links        →  Check broken links (internal + external sample)
 Spelling     →  Verify spelling across user-facing content
 Investigate  →  Root-cause any failures
