@@ -39,7 +39,9 @@ fi
 cd "$WORKDIR"
 mkdir -p superpowers-agents custom/skills
 cp /home/jeric/Workspace/my-agents/update-skills.sh "$WORKDIR/update-skills.sh"
+cp /home/jeric/Workspace/my-agents/setup-agents.sh "$WORKDIR/setup-agents.sh"
 chmod +x "$WORKDIR/update-skills.sh"
+chmod +x "$WORKDIR/setup-agents.sh"
 
 if ! HOME="$TEST_ROOT/home" "$WORKDIR/update-skills.sh" >"$TEST_ROOT/update-skills.log" 2>&1; then
   cat "$TEST_ROOT/update-skills.log" >&2

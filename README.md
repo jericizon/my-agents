@@ -5,7 +5,7 @@ Local manager for Superpowers skills with:
 - optional local overrides at `custom/skills`
 - an upstream fork mirror at `superpowers-fork`
 
-The scripts in this repo keep `~/.agents` pointed at this workspace so Codex can discover skills.
+The scripts in this repo keep one generated skills source in this workspace, then expose it to both Codex and Claude Code.
 
 ## Requirements
 
@@ -15,10 +15,10 @@ The scripts in this repo keep `~/.agents` pointed at this workspace so Codex can
 
 ## Repository Layout
 
-- `superpowers-agents/skills/`: generated sync target used by Codex at runtime
+- `superpowers-agents/skills/`: generated sync target used as the shared runtime skill source
 - `custom/skills/`: editable local custom/override skills copied into the generated mirror on setup/update
 - `superpowers-fork/`: upstream mirror used as update source
-- `setup-agents.sh`: link local `superpowers-agents` to `~/.agents`
+- `setup-agents.sh`: install runtime paths for Codex and Claude Code from the local generated skills mirror
 - `setup-superpowers-fork.sh`: clone/update fork and sync skills
 - `update-skills.sh`: pull latest upstream skills and reapply custom skills
 - `install-global-rules.sh`: link one shared global rules file into multiple CLI config locations
@@ -40,6 +40,8 @@ This will:
 - copy fork skills into `superpowers-agents/skills`
 - copy `custom/skills/*` into `superpowers-agents/skills`
 - create/refresh `~/.agents -> <this-repo>/superpowers-agents`
+- create/refresh `~/.claude/skills -> <this-repo>/superpowers-agents/skills`
+- fall back to copying into `~/.claude/skills` only if the Claude symlink cannot be created
 
 Important:
 - `superpowers-agents/skills` is generated output and is gitignored in this repo
@@ -63,9 +65,7 @@ Manual mode (if needed):
 ./install-global-rules.sh
 ```
 
-If `~/.agents` already exists, the script prompts:
-- `y`: backup first to `~/.agents.backup.<timestamp>`
-- `N` or Enter: do not backup and override existing `~/.agents` (default)
+If `~/.agents` or `~/.claude/skills` already exists, the installer backs it up to `*.backup.<timestamp>` before replacing it.
 
 ## Global Rules Across CLIs
 
@@ -111,7 +111,7 @@ Then run:
 ./update-skills.sh
 ```
 
-Your custom skill will be copied into `superpowers-agents/skills`.
+Your custom skill will be copied into `superpowers-agents/skills`, which is then exposed to both Codex and Claude Code.
 
 ## Tests
 
@@ -138,3 +138,4 @@ cd superpowers-fork/tests/brainstorm-server && npm test
 - `update-skills.sh` intentionally runs `git reset --hard upstream/main` inside `superpowers-fork` to keep the mirror clean.
 - `custom/skills` is your safe place for local changes that should survive updates.
 - `superpowers-agents/skills` is intentionally regenerated on sync and should not be treated as a hand-edited source directory.
+- Claude Code should read the same generated tree via `~/.claude/skills`, or receive a refreshed copy there if symlinks are unavailable.

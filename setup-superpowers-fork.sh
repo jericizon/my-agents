@@ -5,8 +5,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FORK_DIR="$SCRIPT_DIR/superpowers-fork"
 SKILLS_DIR="$SCRIPT_DIR/superpowers-agents/skills"
-AGENTS_DIR="$SCRIPT_DIR/superpowers-agents"
-TARGET_LINK="$HOME/.agents"
 UPSTREAM_REPO="https://github.com/obra/superpowers.git"
 
 echo "Setting up superpowers fork in: $FORK_DIR"
@@ -61,22 +59,8 @@ echo ""
 echo "✓ Setup complete!"
 echo ""
 
-# Update global symlink
-echo "Updating global .agents symlink..."
-
-# Backup existing target
-if [ -e "$TARGET_LINK" ] || [ -L "$TARGET_LINK" ]; then
-    BACKUP_LINK="${TARGET_LINK}.backup.$(date +%s)"
-    echo "Backing up existing target to: $BACKUP_LINK"
-    mv "$TARGET_LINK" "$BACKUP_LINK"
-fi
-
-# Create symlink
-echo "Creating symlink: $TARGET_LINK -> $AGENTS_DIR"
-ln -s "$AGENTS_DIR" "$TARGET_LINK"
-
-echo ""
-echo "✓ Global .agents symlink created!"
+echo "Refreshing agent runtime paths..."
+"$SCRIPT_DIR/setup-agents.sh"
 echo ""
 echo "To update from upstream in the future, run:"
 echo "  ./update-skills.sh"

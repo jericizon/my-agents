@@ -13,8 +13,8 @@ Keep new skills in `custom/skills/<skill-name>/SKILL.md` and mirror the existing
 ## Build, Test, and Development Commands
 Run from repository root unless noted.
 
-- `./setup-agents.sh`: links this repo’s `superpowers-agents` to `~/.agents` (backs up existing target).
-- `./setup-superpowers-fork.sh`: clones/updates `superpowers-fork`, copies skills into `superpowers-agents/skills`, then relinks `~/.agents`.
+- `./setup-agents.sh`: links this repo’s generated agents tree for Codex and exposes the same generated skills to Claude Code via `~/.claude/skills` (backs up existing targets).
+- `./setup-superpowers-fork.sh`: clones/updates `superpowers-fork`, copies skills into `superpowers-agents/skills`, then refreshes the runtime paths.
 - `./update-skills.sh`: refreshes from `upstream/main`, replaces `superpowers-agents/skills`, reapplies `custom/skills`.
 - `bash superpowers-fork/tests/claude-code/run-skill-tests.sh`: runs core Claude Code skill tests.
 - `bash superpowers-fork/tests/claude-code/run-skill-tests.sh --integration`: includes slower integration coverage.
