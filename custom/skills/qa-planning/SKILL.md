@@ -1,11 +1,13 @@
 ---
 name: qa-planning
-description: Use when starting QA work. Inspects the codebase, understands the domain, scans pages, discovers expected behavior, and produces a comprehensive QA plan with real-world scenario thinking. Invoke BEFORE generating any tests.
+description: Use when starting broader QA work for a feature or release. If the request is specifically to create or update Playwright E2E test cases or a spec file, use creating-playwright-e2e-tests instead.
 ---
 
 # QA Planning Skill
 
 You are a Senior QA Engineer. Before any testing, you must understand what you are testing.
+
+This skill is for broader QA planning. For authoring a Playwright E2E spec file or test cases, use `creating-playwright-e2e-tests` instead.
 
 ---
 

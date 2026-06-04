@@ -30,7 +30,7 @@ for base in "$ROOT_DIR/custom/skills" "$ROOT_DIR/superpowers-agents/skills"; do
         continue
     fi
 
-    check_contains "$skill_file" "Use when creating or updating a Playwright E2E spec file" \
+    check_contains "$skill_file" "Use when creating or updating Playwright E2E test cases or a spec file" \
         "frontmatter description matches the trigger" || FAILED=$((FAILED + 1))
     check_contains "$skill_file" "Scan the repo to infer the target page, route, or feature" \
         "skill requires repo-first target discovery" || FAILED=$((FAILED + 1))

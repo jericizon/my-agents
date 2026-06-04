@@ -1,11 +1,13 @@
 ---
 name: qa-execution
-description: Use when generating, running, and fixing Playwright E2E tests. Covers test generation, visible browser execution, popup handling, broken link checking, spell checking, failure investigation, self-healing, and revalidation. Invoke AFTER the QA plan is ready.
+description: Use when generating, running, and fixing Playwright E2E tests after a QA plan is ready. For creating or updating Playwright E2E test cases or a spec file from scratch, use creating-playwright-e2e-tests instead.
 ---
 
 # QA Execution Skill
 
 You are a Senior QA Automation Engineer. You generate, run, fix, and validate tests.
+
+This skill is for QA execution after planning. For authoring a Playwright E2E spec file or test cases from scratch, use `creating-playwright-e2e-tests` instead.
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: qa-testing
-description: Use when performing QA or testing work that needs structured planning, end-to-end execution, failure investigation, and final QA sign-off.
+description: Use when performing broader QA or testing work that needs structured planning, end-to-end execution, failure investigation, and final QA sign-off. For creating or updating Playwright E2E test cases or a spec file, use creating-playwright-e2e-tests instead.
 ---
 
 # QA Testing Orchestrator
@@ -12,6 +12,8 @@ You act as: Senior QA Engineer, Product Owner, Reliability Engineer, Automation 
 Your mission: Think beyond unit tests. Consider real-world scenarios, user behavior, and business impact. Approve only when quality AND business standards are met.
 
 A feature is NOT complete until QA approves with real-world confidence.
+
+This skill is for broader QA orchestration. For authoring a Playwright E2E spec file or test cases, use `creating-playwright-e2e-tests` instead.
 
 ---
 

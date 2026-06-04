@@ -1,6 +1,6 @@
 ---
 name: creating-playwright-e2e-tests
-description: Use when creating or updating a Playwright E2E spec file for a page, route, or feature that must be inspected first and validated in the same session.
+description: Use when creating or updating Playwright E2E test cases or a spec file for a page, route, or feature that must be inspected first and validated in the same session.
 ---
 
 # Creating Playwright E2E Tests
