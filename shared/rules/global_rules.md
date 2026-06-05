@@ -126,6 +126,7 @@ Before changing code:
 * Follow existing conventions.
 * Reuse existing utilities and modules.
 * Minimize scope of change.
+* Never create, edit, or overwrite `.env` files or local environment override files without explicit user confirmation.
 
 Prefer extending existing code over introducing new abstractions.
 
@@ -267,11 +268,17 @@ If a task requires forbidden Git operations, instruct the user to perform them m
 
 Do not start application servers or watch processes.
 
+Assume the application is already running unless the user explicitly asks for startup instructions.
+
+Do not run any command that launches the app, a dev server, a preview server, or a watch-mode process, even if the command name differs from the examples below.
+
 Examples:
 
 * npm run dev
 * npm start
+* pnpm run dev
 * pnpm dev
+* yarn run dev
 * yarn dev
 * docker compose up
 
