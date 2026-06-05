@@ -262,6 +262,18 @@ Never modify repository history.
 
 If a task requires forbidden Git operations, instruct the user to perform them manually.
 
+## COMMIT MESSAGE GUIDELINES
+
+When providing commit message suggestions:
+
+* Use Conventional Commits format: `type(scope): summary`
+* Keep messages concise and focused on the "why" not the "what"
+* Do not include "Generated with" or similar attribution lines
+* Do not include "Co-Authored-By" or co-authorship attributions
+* Do not add tool-specific branding or footers
+
+Commit messages should be clean and free of AI tool attribution.
+
 ---
 
 ## DEV SERVER RESTRICTIONS
