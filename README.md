@@ -1,9 +1,10 @@
 # My Agents
 
 Local manager for Superpowers skills with:
-- a repo-local generated skills mirror at `superpowers-agents/skills`
+- a repo-local merged generated skills mirror at `superpowers-agents/skills`
 - optional local overrides at `custom/skills`
-- an upstream fork mirror at `superpowers-fork`
+- an upstream Superpowers mirror at `superpowers-fork`
+- an upstream Addy Osmani `agent-skills` mirror at `agent-skills-fork`
 
 The scripts in this repo keep one generated skills source in this workspace, then expose it to both Codex and Claude Code.
 
@@ -17,10 +18,11 @@ The scripts in this repo keep one generated skills source in this workspace, the
 
 - `superpowers-agents/skills/`: generated sync target used as the shared runtime skill source
 - `custom/skills/`: editable local custom/override skills copied into the generated mirror on setup/update
-- `superpowers-fork/`: upstream mirror used as update source
+- `superpowers-fork/`: upstream Superpowers mirror used as one update source
+- `agent-skills-fork/`: upstream Addy Osmani `agent-skills` mirror used as a second update source
 - `setup-agents.sh`: install runtime paths for Codex and Claude Code from the local generated skills mirror
-- `setup-superpowers-fork.sh`: clone/update fork and sync skills
-- `update-skills.sh`: pull latest upstream skills and reapply custom skills
+- `setup-superpowers-fork.sh`: clone/update both upstream mirrors and trigger a generated-tree rebuild
+- `update-skills.sh`: pull latest upstream skills from both mirrors, merge them into the generated tree, and reapply custom skills
 - `install-global-rules.sh`: link one shared global rules file into multiple CLI config locations
 - `sync-agents.sh`: one command for fresh install or updates (always updates both skills and global rules)
 
@@ -34,11 +36,13 @@ The scripts in this repo keep one generated skills source in this workspace, the
 ```
 
 This will:
-- run first-time setup if needed (`superpowers-fork` clone + initial sync)
-- always update skills from upstream and reapply custom skills
+- run first-time setup if needed (`superpowers-fork` and `agent-skills-fork` clone + initial sync)
+- always update both upstream mirrors and reapply custom skills
 - always update global rules links across configured CLIs
-- copy fork skills into `superpowers-agents/skills`
-- copy `custom/skills/*` into `superpowers-agents/skills`
+- rebuild `superpowers-agents/skills` from:
+  1. `superpowers-fork/skills`
+  2. `agent-skills-fork/skills` for non-conflicting skill names only
+  3. `custom/skills/*`
 - create/refresh `~/.agents -> <this-repo>/superpowers-agents`
 - create/refresh `~/.claude/skills -> <this-repo>/superpowers-agents/skills`
 - fall back to copying into `~/.claude/skills` only if the Claude symlink cannot be created
@@ -56,7 +60,7 @@ Recommended:
 ```
 
 This will:
-- always run skill updates and global rules updates in one pass
+- always run both upstream skill updates, rebuild the merged generated tree, and refresh global rules in one pass
 
 Manual mode (if needed):
 
@@ -113,6 +117,13 @@ Then run:
 
 Your custom skill will be copied into `superpowers-agents/skills`, which is then exposed to both Codex and Claude Code.
 
+Merge precedence is:
+1. `superpowers-fork/skills`
+2. `agent-skills-fork/skills` for non-conflicting skill names only
+3. `custom/skills`
+
+If a skill exists in both upstream mirrors, the Superpowers version is retained unless you override it in `custom/skills`.
+
 ## Tests
 
 From repo root:
@@ -136,6 +147,7 @@ cd superpowers-fork/tests/brainstorm-server && npm test
 ## Notes
 
 - `update-skills.sh` intentionally runs `git reset --hard upstream/main` inside `superpowers-fork` to keep the mirror clean.
+- `update-skills.sh` intentionally runs `git reset --hard upstream/main` inside both local upstream mirrors to keep them clean.
 - `custom/skills` is your safe place for local changes that should survive updates.
 - `superpowers-agents/skills` is intentionally regenerated on sync and should not be treated as a hand-edited source directory.
 - Claude Code should read the same generated tree via `~/.claude/skills`, or receive a refreshed copy there if symlinks are unavailable.

@@ -4,12 +4,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FORK_DIR="$SCRIPT_DIR/superpowers-fork"
+AGENT_SKILLS_FORK_DIR="$SCRIPT_DIR/agent-skills-fork"
 
 echo "Running unified agents sync..."
 echo ""
 
-if [ ! -d "$FORK_DIR/.git" ]; then
-    echo "Fresh setup detected (missing superpowers-fork)."
+if [ ! -d "$FORK_DIR/.git" ] || [ ! -d "$AGENT_SKILLS_FORK_DIR/.git" ]; then
+    echo "Fresh setup detected (missing upstream skill mirror)."
     "$SCRIPT_DIR/setup-superpowers-fork.sh"
 else
     echo "Existing setup detected."

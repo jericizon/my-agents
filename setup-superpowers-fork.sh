@@ -4,17 +4,20 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FORK_DIR="$SCRIPT_DIR/superpowers-fork"
+AGENT_SKILLS_FORK_DIR="$SCRIPT_DIR/agent-skills-fork"
 SKILLS_DIR="$SCRIPT_DIR/superpowers-agents/skills"
 UPSTREAM_REPO="https://github.com/obra/superpowers.git"
+AGENT_SKILLS_UPSTREAM_REPO="https://github.com/addyosmani/agent-skills.git"
 
-echo "Setting up superpowers fork in: $FORK_DIR"
+echo "Setting up upstream skill mirrors..."
 
 ensure_upstream_remote() {
+    local remote_url="$1"
+
     if git remote get-url upstream >/dev/null 2>&1; then
         return
     fi
 
-    remote_url="$UPSTREAM_REPO"
     if git remote get-url origin >/dev/null 2>&1; then
         remote_url="$(git remote get-url origin)"
     fi
@@ -23,20 +26,30 @@ ensure_upstream_remote() {
     git remote add upstream "$remote_url"
 }
 
-# Create fork directory
-if [ -d "$FORK_DIR" ]; then
-    echo "Fork directory already exists. Updating..."
-    cd "$FORK_DIR"
-    ensure_upstream_remote
-    git fetch upstream
-else
-    echo "Cloning superpowers repository..."
-    git clone --depth 1 "$UPSTREAM_REPO" "$FORK_DIR"
-    cd "$FORK_DIR"
-    
-    # Add upstream remote for future updates
+setup_mirror_repo() {
+    local repo_dir="$1"
+    local repo_url="$2"
+    local label="$3"
+
+    if [ -d "$repo_dir/.git" ]; then
+        echo "$label directory already exists. Updating..."
+        cd "$repo_dir"
+        ensure_upstream_remote "$repo_url"
+        git fetch upstream
+        return
+    fi
+
+    echo "Cloning $label repository..."
+    git clone --depth 1 "$repo_url" "$repo_dir"
+    cd "$repo_dir"
     git remote rename origin upstream
-fi
+}
+
+echo "Setting up Superpowers fork in: $FORK_DIR"
+setup_mirror_repo "$FORK_DIR" "$UPSTREAM_REPO" "Superpowers"
+
+echo "Setting up agent-skills mirror in: $AGENT_SKILLS_FORK_DIR"
+setup_mirror_repo "$AGENT_SKILLS_FORK_DIR" "$AGENT_SKILLS_UPSTREAM_REPO" "agent-skills"
 
 # Create superpowers-agents/skills directory if it doesn't exist
 if [ ! -d "$SKILLS_DIR" ]; then
@@ -44,23 +57,12 @@ if [ ! -d "$SKILLS_DIR" ]; then
     mkdir -p "$SKILLS_DIR"
 fi
 
-# Copy skills from fork to superpowers-agents/skills
-echo "Copying skills from fork to superpowers-agents/skills..."
-cp -r "$FORK_DIR/skills/"* "$SKILLS_DIR/"
-
-# Copy custom skills if they exist
-CUSTOM_SKILLS_DIR="$SCRIPT_DIR/custom/skills"
-if [ -d "$CUSTOM_SKILLS_DIR" ] && [ "$(ls -A $CUSTOM_SKILLS_DIR)" ]; then
-    echo "Copying custom skills..."
-    cp -r "$CUSTOM_SKILLS_DIR"/* "$SKILLS_DIR/"
-fi
-
 echo ""
 echo "✓ Setup complete!"
 echo ""
 
-echo "Refreshing agent runtime paths..."
-"$SCRIPT_DIR/setup-agents.sh"
+echo "Refreshing generated skills tree..."
+"$SCRIPT_DIR/update-skills.sh"
 echo ""
 echo "To update from upstream in the future, run:"
 echo "  ./update-skills.sh"

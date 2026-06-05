@@ -2,146 +2,308 @@
 description: Global engineering and safety rules for all repositories
 ---
 
-# AI ENGINEERING SYSTEM — CTO MODE
+# AI ENGINEERING SYSTEM
 
 ## CORE PRINCIPLES
 
-1. **Understand first** — Never assume. Ask when blocked, unclear, or scope is ambiguous.
-2. **Prefer simplicity** — Smallest safe change. Reuse existing patterns. No overengineering.
-3. **Disciplined flow** — classify → plan → test → implement → validate → QA
-4. **Quality gates** — Task incomplete without: passing meaningful tests, met acceptance criteria, zero HIGH severity issues.
-5. **Security baseline** — Auth, payments, admin, webhooks, wallets, and protected data are HIGH RISK by default.
-
-## IMPLEMENTATION DEFAULTS
-
-- Before any code change, scan the relevant code paths first.
-- Do not modify or invent code blindly; confirm the target code exists before changing it.
-- Prefer the smallest reusable solution that fits existing patterns.
-- Reuse existing modules, helpers, and conventions before adding new abstractions.
-- Reject speculative flexibility, premature abstraction, and clever but unnecessary code.
+1. Understand before acting.
+2. Clarify when requirements, scope, or success criteria are unclear.
+3. Prefer the smallest safe change.
+4. Reuse existing patterns before creating new ones.
+5. Avoid overengineering and speculative abstractions.
+6. QA is mandatory.
+7. Never claim success without validation.
 
 ---
 
-## REQUEST WORKFLOW
+## REQUEST CLASSIFICATION
 
-### Classification
-Every request is one of: `BUGFIX` | `UPDATE` | `NEW_FEATURE`
+Classify every task before starting:
 
-### Clarification Guard
-Hard stop if any of these are undefined:
-- requirements, expected behavior, scope, or success criteria
+* BUGFIX
+* UPDATE
+* NEW_FEATURE
+* REFACTOR
+* PERFORMANCE
+* SECURITY
+* TESTING
+* DOCUMENTATION
+* INVESTIGATION
 
-### Planning
-Before writing any code:
-- Inspect existing implementation and related tests
-- Define approach, affected areas, and acceptance criteria
+If classification or requirements are unclear:
 
-### TDD (Non-Negotiable)
-Order: define cases → write tests → implement → verify
+STOP and ask questions.
 
-Tests must cover: happy path · invalid input · edge cases · regression scenarios
+---
 
-No implementation before tests exist.
+## WORKFLOW
 
-### QA Validation
-Before marking complete, verify:
-- Tests are meaningful and passing
-- Implementation matches requirements
-- Edge cases and regressions handled
-- Code follows existing patterns
-- No overengineering introduced
+Before implementation:
 
-Fail → fix → re-test → re-validate
+1. Scan relevant code paths.
+2. Confirm target code exists.
+3. Review existing implementation.
+4. Select relevant Agent Skills.
+5. Follow Superpowers workflow.
+6. Define acceptance criteria.
+7. Implement.
+8. Validate.
+9. QA.
+10. Report results.
 
-**QA Testing Requirement:**
-When prompted to perform QA or testing tasks, **MUST use the `qa-testing` skill** to ensure QA standards are followed properly. This includes:
-- Generating comprehensive QA plans with real-world scenario thinking
-- Automatically generating Playwright E2E tests
-- Executing visible browser tests with persistent sessions
-- Investigating failures and applying safe fixes
-- Validating production readiness with business impact analysis
+---
+
+## SUPERPOWERS DOCUMENTATION
+
+Use Superpowers documentation structure when applicable.
+
+Locations:
+
+```text
+docs/superpowers/specifications/
+docs/superpowers/plans/
+docs/superpowers/qa/
+docs/superpowers/reviews/
+docs/superpowers/retrospectives/
+```
+
+Required:
+
+### New Features
+
+* Specification
+* Plan
+* QA Report
+
+### Major Enhancements
+
+* Plan
+* QA Report
+
+### Significant Refactors
+
+* Plan
+* QA Report
+
+### Small Bug Fixes
+
+* QA Report only if documentation would add value.
+
+Avoid creating unnecessary documentation.
+
+---
+
+## AGENT SKILL SELECTION
+
+Automatically invoke the most relevant skill(s).
+
+| Task Type              | Skill                    |
+| ---------------------- | ------------------------ |
+| Bug Fix                | systematic-debugging     |
+| New Feature            | specification-writing    |
+| Refactor               | refactoring              |
+| API Design             | api-design               |
+| Database Work          | database-design          |
+| Performance Issues     | performance-optimization |
+| Security Review        | security-review          |
+| Architecture Decisions | architecture-review      |
+| Testing                | test-driven-development  |
+| Code Review            | code-review-and-quality  |
+| Validation             | Superpowers QA Workflow  |
+| Unclear Requirements   | brainstorming            |
+| Final Validation       | code-review-and-quality  |
+
+Use only the skills relevant to the task.
+
+---
+
+## IMPLEMENTATION RULES
+
+Before changing code:
+
+* Locate existing implementation.
+* Review related files and tests.
+* Follow existing conventions.
+* Reuse existing utilities and modules.
+* Minimize scope of change.
+
+Prefer extending existing code over introducing new abstractions.
+
+Do not modify or invent code blindly.
+
+---
+
+## TESTING STRATEGY
+
+Use TDD when appropriate:
+
+* Business logic
+* APIs
+* Services
+* Financial calculations
+* Critical workflows
+
+For UI, configuration, documentation, styling, or infrastructure changes:
+
+* Implement
+* Validate
+* Add regression coverage where practical
+
+All changes require validation.
+
+---
+
+## QA REQUIREMENTS
+
+QA is mandatory.
+
+For QA and validation:
+
+1. Follow the Superpowers QA workflow.
+2. Use the most relevant testing/review skill available.
+3. Generate realistic test scenarios.
+4. Consider edge cases and regressions.
+5. Validate business impact.
+6. Verify acceptance criteria.
+
+When applicable:
+
+- Run unit tests
+- Run integration tests
+- Run E2E tests
+- Perform manual validation
+- Review logs and error handling
+
+Document findings in:
+
+docs/superpowers/qa/
+
+Before completion verify:
+
+* Requirements satisfied
+* No regressions introduced
+* Existing patterns respected
+* Validation completed
 
 ---
 
 ## SECURITY RULES
 
-### Always enforce:
-- Server-side authorization on every protected route/action
-- Ownership validation before any data mutation
-- Input validation and sanitization (never trust client data)
-- Explicit, typed error handling (no silent failures or generic 500s)
-- Idempotency on payments, webhooks, and state-mutating operations
-- Rate limiting on auth endpoints and public-facing APIs
-- Audit logging for admin actions, auth events, and financial operations
+Treat these as HIGH RISK by default:
 
-### Never expose:
-- Secrets, tokens, API keys, or credentials (in code, logs, or responses)
-- Raw payment data, card details, or PII beyond what's required
-- Stack traces or internal errors to the client
-- Sensitive internal data in client-visible responses or URLs
+* Authentication
+* Authorization
+* Payments
+* Wallets
+* Admin Actions
+* Webhooks
+* Protected Data
 
-### Dependency hygiene:
-- Flag use of unmaintained or vulnerable packages
-- Prefer well-audited libraries for crypto, auth, and parsing
+Always enforce:
+
+* Server-side authorization
+* Ownership validation
+* Input validation
+* Explicit error handling
+* Idempotency where required
+* Rate limiting where applicable
+* Audit logging for sensitive operations
+
+Never expose:
+
+* Secrets
+* Tokens
+* Credentials
+* Internal stack traces
+* Sensitive data
+
+Flag vulnerable or unmaintained dependencies.
+
+---
+
+## DOCUMENTATION
+
+Update documentation when:
+
+* Architecture changes
+* Public APIs change
+* Database schemas change
+* Workflows change
+* New features are added
+
+Prefer updating existing documentation over creating duplicates.
 
 ---
 
 ## GIT SAFETY
 
-**Read-only by default.** Limited write operations permitted.
+Allowed:
 
-| Allowed | Forbidden |
-|---|---|
-| `git status`, `git diff`, `git log`, `git show` | `merge`, `rebase`, `reset`, `checkout`, `stash`, branch/tag deletion |
-| `git commit` | `commit` to `master`/`main`/`develop`/`staging` |
-| `git push` | `push` to `master`/`main`/`develop`/`staging` |
+* git status
+* git diff
+* git log
+* git show
+* git branch
 
-**Protected branches:** `master`, `main`, `develop`, `staging` — never commit or push directly to these.
+Forbidden:
 
-If a task requires forbidden git ops → refuse, instruct user to run manually.
+* git commit
+* git push
+* git merge
+* git rebase
+* git reset
+* git checkout
+* git stash
+* branch deletion
+* force push
+
+Never modify repository history.
+
+If a task requires forbidden Git operations, instruct the user to perform them manually.
 
 ---
-
-### Commit Message Guidelines
-- **Do not add AI-generated signatures** to commit messages
-- Exclude the following from all commits:
-  - "Generated with [AI tool]" or similar attribution
-  - "Co-Authored-By: [any entity]" or similar co-authorship markers
-  - Any AI tool branding or promotional text
-- Commit messages should be clean, professional, and focused on the change itself
-- Use conventional commit format: `type(scope): description`
 
 ## DEV SERVER RESTRICTIONS
 
-Do NOT start servers or watchers. Forbidden: `npm run dev`, `npm start`, `pnpm dev`, `yarn dev`, `docker compose up`, any equivalent.
+Do not start application servers or watch processes.
 
-User manages all runtime processes. If startup is needed → instruct user explicitly.
+Examples:
 
----
+* npm run dev
+* npm start
+* pnpm dev
+* yarn dev
+* docker compose up
 
-## SUB-AGENT STRATEGY
+User manages runtime processes.
 
-**Use when:** tasks are independent, isolated by domain, or QA needs a clean review pass.
-
-**Avoid when:** debugging exploratory issues, changes are tightly coupled, or files are shared across agents.
+If startup is required, provide instructions only.
 
 ---
 
 ## OUTPUT STYLE
 
-- Structured · concise · explicit · actionable
-- No filler, no hidden reasoning, no unnecessary verbosity
-- Completion messages: confident, concise — *bahagyang witty Tagalog allowed*
+Responses should be:
+
+* Structured
+* Concise
+* Explicit
+* Actionable
+
+Do not include unnecessary verbosity.
 
 ---
 
-## HARD FAIL CONDITIONS
+## COMPLETION CHECKLIST
 
-Auto-fail if any of these are missing:
+Before marking work complete:
 
-- [ ] Clarification (when required)
-- [ ] Plan (before implementation)
-- [ ] Tests (before code)
-- [ ] Executable, passing tests
-- [ ] QA pass
-- [ ] Validation against acceptance criteria
+* Requirements understood
+* Relevant documentation updated
+* Implementation completed
+* Validation completed
+* QA completed
+* Acceptance criteria verified
+* No known blocking issues
+
+Do not mark a task complete if validation or QA has not been performed.
