@@ -74,10 +74,6 @@ cat > "$WORKDIR/shared/rules/global_rules.md" <<'RULES'
 RULES
 
 cp "$REPO_ROOT/sync-agents.sh" "$WORKDIR/"
-cp "$REPO_ROOT/update-skills.sh" "$WORKDIR/"
-cp "$REPO_ROOT/setup-superpowers-fork.sh" "$WORKDIR/"
-cp "$REPO_ROOT/setup-agents.sh" "$WORKDIR/"
-cp "$REPO_ROOT/install-global-rules.sh" "$WORKDIR/"
 cp "$REPO_ROOT/README.md" "$WORKDIR/"
 cp "$REPO_ROOT/.gitignore" "$WORKDIR/"
 chmod +x "$WORKDIR/"*.sh

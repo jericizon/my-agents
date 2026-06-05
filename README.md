@@ -20,11 +20,7 @@ The scripts in this repo keep one generated skills source in this workspace, the
 - `custom/skills/`: editable local custom/override skills copied into the generated mirror on setup/update
 - `superpowers-fork/`: upstream Superpowers mirror used as one update source
 - `agent-skills-fork/`: upstream Addy Osmani `agent-skills` mirror used as a second update source
-- `setup-agents.sh`: install runtime paths for Codex and Claude Code from the local generated skills mirror
-- `setup-superpowers-fork.sh`: clone/update both upstream mirrors and trigger a generated-tree rebuild
-- `update-skills.sh`: pull latest upstream skills from both mirrors, merge them into the generated tree, and reapply custom skills
-- `install-global-rules.sh`: link one shared global rules file into multiple CLI config locations
-- `sync-agents.sh`: one command for fresh install or updates (always updates both skills and global rules)
+- `sync-agents.sh`: the only maintenance entrypoint; clones or refreshes both upstream mirrors, rebuilds generated skills, refreshes runtime links, and links global rules
 
 ## Quick Start (Single Command)
 
@@ -36,9 +32,9 @@ The scripts in this repo keep one generated skills source in this workspace, the
 ```
 
 This will:
-- run first-time setup if needed (`superpowers-fork` and `agent-skills-fork` clone + initial sync)
-- always update both upstream mirrors and reapply custom skills
-- always update global rules links across configured CLIs
+- clone missing upstream mirrors or refresh existing ones
+- update both upstream mirrors and reapply custom skills
+- update global rules links across configured CLIs
 - rebuild `superpowers-agents/skills` from:
   1. `superpowers-fork/skills`
   2. `agent-skills-fork/skills` for non-conflicting skill names only
@@ -62,13 +58,6 @@ Recommended:
 This will:
 - always run both upstream skill updates, rebuild the merged generated tree, and refresh global rules in one pass
 
-Manual mode (if needed):
-
-```bash
-./update-skills.sh
-./install-global-rules.sh
-```
-
 If `~/.agents` or `~/.claude/skills` already exists, the installer backs it up to `*.backup.<timestamp>` before replacing it.
 
 ## Global Rules Across CLIs
@@ -82,10 +71,10 @@ shared/rules/global_rules.md
 Install for configured CLIs:
 
 ```bash
-./install-global-rules.sh
+./sync-agents.sh
 ```
 
-This script creates symlinks (with automatic backups if a target file exists) for:
+The sync script creates symlinks (with automatic backups if a target file exists) for:
 - `~/.codex/AGENTS.md`
 - `~/.claude/CLAUDE.md`
 - `~/.gemini/GEMINI.md`
@@ -112,7 +101,7 @@ Use kebab-case for `<skill-name>` (example: `qa-testing`).
 Then run:
 
 ```bash
-./update-skills.sh
+./sync-agents.sh
 ```
 
 Your custom skill will be copied into `superpowers-agents/skills`, which is then exposed to both Codex and Claude Code.
@@ -146,8 +135,7 @@ cd superpowers-fork/tests/brainstorm-server && npm test
 
 ## Notes
 
-- `update-skills.sh` intentionally runs `git reset --hard upstream/main` inside `superpowers-fork` to keep the mirror clean.
-- `update-skills.sh` intentionally runs `git reset --hard upstream/main` inside both local upstream mirrors to keep them clean.
+- `sync-agents.sh` intentionally runs `git reset --hard upstream/main` inside both local upstream mirrors to keep them clean.
 - `custom/skills` is your safe place for local changes that should survive updates.
 - `superpowers-agents/skills` is intentionally regenerated on sync and should not be treated as a hand-edited source directory.
 - Claude Code should read the same generated tree via `~/.claude/skills`, or receive a refreshed copy there if symlinks are unavailable.

@@ -62,10 +62,6 @@ cat > "$WORKDIR/shared/rules/global_rules.md" <<'RULES'
 RULES
 
 cp "$REPO_ROOT/sync-agents.sh" "$WORKDIR/"
-cp "$REPO_ROOT/update-skills.sh" "$WORKDIR/"
-cp "$REPO_ROOT/setup-superpowers-fork.sh" "$WORKDIR/"
-cp "$REPO_ROOT/setup-agents.sh" "$WORKDIR/"
-cp "$REPO_ROOT/install-global-rules.sh" "$WORKDIR/"
 cp "$REPO_ROOT/README.md" "$WORKDIR/"
 cp "$REPO_ROOT/.gitignore" "$WORKDIR/"
 chmod +x "$WORKDIR/"*.sh
@@ -81,8 +77,9 @@ git clone "$ADDY_REMOTE" "$WORKDIR/agent-skills-fork" >/dev/null
   git checkout main >/dev/null
 )
 
-update_log="$TEST_ROOT/update-skills.log"
-HOME="$HOME_DIR" "$WORKDIR/update-skills.sh" >"$update_log"
+cd "$WORKDIR"
+update_log="$TEST_ROOT/sync-agents.log"
+HOME="$HOME_DIR" ./sync-agents.sh >"$update_log"
 
 skill_file="$WORKDIR/superpowers-agents/skills/test-driven-development/SKILL.md"
 grep -Fq "SUPERPOWERS VERSION" "$skill_file"

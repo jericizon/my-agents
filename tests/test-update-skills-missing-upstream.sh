@@ -65,13 +65,17 @@ fi
 
 cd "$WORKDIR"
 mkdir -p superpowers-agents custom/skills
-cp /home/jeric/Workspace/my-agents/update-skills.sh "$WORKDIR/update-skills.sh"
-cp /home/jeric/Workspace/my-agents/setup-agents.sh "$WORKDIR/setup-agents.sh"
-chmod +x "$WORKDIR/update-skills.sh"
-chmod +x "$WORKDIR/setup-agents.sh"
+mkdir -p "$WORKDIR/shared/rules"
+cat > "$WORKDIR/shared/rules/global_rules.md" <<'RULES'
+# Global Rules
+RULES
+cp /home/jeric/Workspace/my-agents/sync-agents.sh "$WORKDIR/sync-agents.sh"
+cp /home/jeric/Workspace/my-agents/README.md "$WORKDIR/README.md"
+cp /home/jeric/Workspace/my-agents/.gitignore "$WORKDIR/.gitignore"
+chmod +x "$WORKDIR/sync-agents.sh"
 
-if ! HOME="$TEST_ROOT/home" "$WORKDIR/update-skills.sh" >"$TEST_ROOT/update-skills.log" 2>&1; then
-  cat "$TEST_ROOT/update-skills.log" >&2
+if ! HOME="$TEST_ROOT/home" "$WORKDIR/sync-agents.sh" >"$TEST_ROOT/sync-agents.log" 2>&1; then
+  cat "$TEST_ROOT/sync-agents.log" >&2
   exit 1
 fi
 

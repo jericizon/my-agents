@@ -73,10 +73,6 @@ cat > "$WORKDIR/shared/rules/global_rules.md" <<'RULES'
 RULES
 
 cp "$REPO_ROOT/sync-agents.sh" "$WORKDIR/"
-cp "$REPO_ROOT/update-skills.sh" "$WORKDIR/"
-cp "$REPO_ROOT/setup-superpowers-fork.sh" "$WORKDIR/"
-cp "$REPO_ROOT/setup-agents.sh" "$WORKDIR/"
-cp "$REPO_ROOT/install-global-rules.sh" "$WORKDIR/"
 cp "$REPO_ROOT/README.md" "$WORKDIR/"
 cp "$REPO_ROOT/.gitignore" "$WORKDIR/"
 chmod +x "$WORKDIR/"*.sh
@@ -115,5 +111,9 @@ test -L "$HOME_DIR/.agents"
 test "$(readlink "$HOME_DIR/.agents")" = "$WORKDIR/superpowers-agents"
 test -L "$HOME_DIR/.claude/skills"
 test "$(readlink "$HOME_DIR/.claude/skills")" = "$WORKDIR/superpowers-agents/skills"
+test -L "$HOME_DIR/.codex/AGENTS.md"
+test "$(readlink "$HOME_DIR/.codex/AGENTS.md")" = "$WORKDIR/shared/rules/global_rules.md"
+test -L "$HOME_DIR/.claude/CLAUDE.md"
+test "$(readlink "$HOME_DIR/.claude/CLAUDE.md")" = "$WORKDIR/shared/rules/global_rules.md"
 
 echo "PASS: sync-agents is idempotent for tracked repo files"
