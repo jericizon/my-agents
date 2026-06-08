@@ -286,10 +286,10 @@ Do not run any command that launches the app, a dev server, a preview server, or
 
 Examples:
 
-* npm run dev
-* npm start
 * pnpm run dev
 * pnpm dev
+* npm run dev
+* npm start
 * yarn run dev
 * yarn dev
 * docker compose up
