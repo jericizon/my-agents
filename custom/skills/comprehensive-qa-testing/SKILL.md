@@ -33,6 +33,7 @@ Do not use this skill when:
 - The main agent owns the live browser session.
 - Sub-agents may support planning, risk review, coverage review, and E2E spec drafting, but they must not take over the main live browser session.
 - Prefer MCP browser tooling first. If MCP is unavailable, fall back to Playwright CLI or repo-standard Playwright execution instead of blocking immediately.
+- If a blocker appears during the QA flow and a safe fix is obvious, apply the smallest fix that removes the blocker, preserves the current user flow, and avoids unrelated cleanup or refactoring.
 - Save a video artifact for every comprehensive QA run.
 
 ## Workflow
@@ -66,9 +67,10 @@ Do not use this skill when:
     - page crashes
     - uncaught exceptions
     - failed network behavior that breaks the objective
-12. Validate the outcome, not just the clicks. Confirm the expected result is visible or otherwise provable in the UI.
-13. Confirm the main objective was actually reached. If not, report where the flow failed and why.
-14. After the live QA pass, create or update a reusable Playwright E2E spec file for future-proofing. Reuse repo patterns first and keep selectors and helpers aligned with the target repo.
+12. If one of those errors creates a blocker, fix only the current blocker when the minimal safe fix is clear. Keep the existing flow intact, avoid broad updates, then rerun the affected portion of the QA path and continue.
+13. Validate the outcome, not just the clicks. Confirm the expected result is visible or otherwise provable in the UI.
+14. Confirm the main objective was actually reached. If not, report where the flow failed and why.
+15. After the live QA pass, create or update a reusable Playwright E2E spec file for future-proofing. Reuse repo patterns first and keep selectors and helpers aligned with the target repo.
 
 ## Runtime Strategy
 
@@ -133,5 +135,6 @@ Report `BLOCKED` when:
 - required auth or seed data is unavailable
 - browser tooling is unavailable and no viable Playwright fallback exists
 - the workflow cannot be completed without unsafe assumptions
+- the blocker cannot be removed with a small, targeted fix that preserves the intended flow
 
 Blocked output must state the exact blocker and the minimum next action needed.
