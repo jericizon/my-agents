@@ -245,11 +245,13 @@ Allowed:
 * git log
 * git show
 * git branch
+* git commit
+* git push
 
 Forbidden:
 
-* git commit
-* git push
+* git commit to restricted branches (main, master, develop, staging, or other protected branches as configured)
+* git push to restricted branches (main, master, develop, staging, or other protected branches as configured)
 * git merge
 * git rebase
 * git reset
@@ -259,6 +261,10 @@ Forbidden:
 * force push
 
 Never modify repository history.
+
+Before committing or pushing:
+* Verify the target branch is NOT a restricted/protected branch
+* For restricted branches, instruct the user to perform the operation manually or use proper PR workflow
 
 If a task requires forbidden Git operations, instruct the user to perform them manually.
 
