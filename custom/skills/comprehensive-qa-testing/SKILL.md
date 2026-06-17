@@ -1,6 +1,6 @@
 ---
 name: comprehensive-qa-testing
-description: Use when the user asks for comprehensive QA, real browser QA, Playwright MCP QA, real end-to-end testing, or live user-style validation against an already running application.
+description: Use when the user asks for comprehensive QA, real browser QA, Playwright MCP QA, real end-to-end testing, live user-style validation against an already running application, or a client-presentable demo video (real browser, visible mouse movement) of a validated flow.
 ---
 
 # Comprehensive QA Testing
@@ -18,6 +18,7 @@ Use this skill when:
 - the user wants real end-to-end testing in a browser
 - the user wants Playwright MCP testing or real browser QA
 - the user wants the agent to act like a real user and validate the actual workflow
+- the user wants a client-presentable demo video of the validated flow (real browser, visible mouse movement)
 - the target application is already running and reachable
 
 Do not use this skill when:
@@ -106,7 +107,68 @@ If Playwright MCP is unavailable, continue with Playwright CLI-based live testin
 
 Use Playwright's built-in screenshot and video options to maintain the artifact structure defined above.
 
+When no browser MCP is configured and no system browser exists, install Playwright in an
+**isolated temp directory** so the target repo's `package.json`/lockfile stay clean:
+
+```bash
+WORK=$(mktemp -d) && cd "$WORK"
+echo '{"name":"demo","private":true,"type":"module"}' > package.json
+npm install --no-fund --no-audit playwright ffmpeg-static
+PLAYWRIGHT_BROWSERS_PATH="$WORK/ms-browsers" npx playwright install chromium
+```
+
+Playwright records video natively (`recordVideo` context option → `.webm`) with **no
+system ffmpeg required**. `ffmpeg-static` is only needed to transcode `.webm` → `.mp4`.
+
 If neither MCP nor Playwright execution is possible, report `BLOCKED` with the exact reason.
+
+## Client-Presentable Demo Recording (real cursor + captions)
+
+When the user wants a **demo-presentable** video (for a client / stakeholder), a plain
+Cypress or Playwright-MCP recording is not enough: those capture only the page viewport,
+**not the OS mouse cursor**, so the result looks like a "preview" with values changing on
+their own. To produce a polished walkthrough of the actual app:
+
+- **Tooling:** `playwright` (drives real Chromium, records the real viewport) + `ffmpeg-static`
+  (transcode `.webm` → client-friendly `.mp4`). No browser plugin or MCP is required.
+- **Visible mouse movement** is a *technique*, not a tool: inject an **animated cursor**
+  element via `context.addInitScript(...)` that follows real mouse events, and move the
+  mouse in **steps** (`page.mouse.move(x, y, { steps: 28 })`) so it glides between targets.
+- **Narration:** inject a **caption bar** overlay and update its text before each step so a
+  non-technical viewer can follow the flow.
+- **Realistic input:** type with `locator.pressSequentially(text, { delay: 75 })`.
+- **Reversibility:** if the demo mutates data, restore it at the end of the flow (e.g. an
+  API `PATCH` via `page.evaluate(fetch(...))`) so the environment is left unchanged.
+- **Deliverable:** save the `.mp4` (and optionally `.webm`) into
+  `docs/qa-artifacts/<timestamp>_<feature>/` alongside the milestone screenshots.
+
+A **project-agnostic** recorder lives at **`assets/playwright-demo-recorder.mjs`** (next to
+this skill). You do **not** edit the recorder — it takes the app's base URL and a *flow
+file* on the command line. The flow file is the only project-specific part: copy
+**`assets/example-flow.mjs`**, adapt the selectors/journey to the app, and run:
+
+```bash
+cd "$WORK"   # run from the dir where playwright/ffmpeg-static were installed
+PLAYWRIGHT_BROWSERS_PATH="$WORK/ms-browsers" \
+  node /path/to/assets/playwright-demo-recorder.mjs \
+    --base http://localhost:3000 \
+    --flow /path/to/my-flow.mjs \
+    --out  ./qa-demo-output \
+    --name <feature>-demo
+# flags also settable via env: DEMO_BASE / DEMO_FLOW / DEMO_OUT / DEMO_NAME / DEMO_WIDTH / DEMO_HEIGHT / DEMO_HEADED
+```
+
+The recorder resolves `playwright`/`ffmpeg-static` from the **current working dir** (run it
+from `$WORK`), or set `DEMO_MODULES=/path/to/dir-with-node_modules` to point elsewhere.
+
+The recorder implements the injected cursor, caption bar, stepped `glideClick`/`glideTo`
+helpers, realistic typing, and automatic `.webm` → `.mp4` transcode (skipped gracefully if
+`ffmpeg-static` is absent). The flow file just exports `default async function runFlow(page, h)`
+and uses the helpers `h.goto / h.caption / h.glideClick / h.glideTo / h.type / h.sleep`.
+Run with no `--flow` to record a placeholder open-only clip that verifies the setup.
+
+This demo recording is the **last phase** — produce it only after the live QA pass has
+already proven the flow works; it is presentation, not validation.
 
 ## Screenshot And Video Artifacts
 
@@ -126,9 +188,12 @@ When running E2E tests, always capture visual proof of changes using the Playwri
 
 ### Video Recording
 
-- Record a video of the full test run whenever the Playwright MCP supports it
+- Record a video of the full test run whenever the browser tooling supports it (Playwright
+  MCP, or Playwright `recordVideo` via the isolated install above)
 - Use incremental IDs if multiple videos are needed (001_video, 002_video, etc.)
 - Store videos in the same directory as screenshots: `docs/qa-artifacts/<timestamp>_<task_or_feature>/<video_id>.webm`
+- For a **client-presentable** deliverable, also produce an `.mp4` with a visible animated
+  cursor + captions using `assets/playwright-demo-recorder.mjs` (see the demo section above)
 - If the target repo already defines a standard Playwright output location, reuse it
 - Otherwise store recordings under `docs/qa-artifacts/` following the naming convention above
 - Keep one browser session whenever possible so the recorded flow is coherent and useful for preview
@@ -141,7 +206,8 @@ docs/qa-artifacts/
 │   ├── 001.png          # Initial state
 │   ├── 002.png          # After form fill
 │   ├── 003.png          # Success state
-│   └── 001_video.webm   # Full run recording
+│   ├── 001_video.webm   # Full run recording
+│   └── client_demo.mp4  # Client-presentable walkthrough (animated cursor + captions)
 └── 20250617_144511_checkout_flow/
     ├── 001.png
     ├── 002.png
