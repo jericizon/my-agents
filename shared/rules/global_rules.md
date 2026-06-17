@@ -134,6 +134,18 @@ Do not modify or invent code blindly.
 
 ---
 
+## COMMENTS
+
+Say what the code does and why, briefly. The problem belongs in the PR.
+
+* Default to 1–2 lines. A comment growing into a paragraph is a smell.
+* Don't write 4–6 line comment headers on functions/blocks unless asked.
+* This applies to my own added comments — still match existing file conventions where a file already uses a heavier comment style.
+* Don't narrate the incident, root-cause analysis, or alternatives considered in the code; that's PR-description material. Leave a terse pointer at most.
+* Keep the non-obvious *why* (a surprising choice, a magic number); drop the backstory.
+
+---
+
 ## TESTING STRATEGY
 
 Use TDD when appropriate:
