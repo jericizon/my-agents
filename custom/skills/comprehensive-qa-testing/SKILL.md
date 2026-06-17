@@ -48,7 +48,7 @@ Do not use this skill when:
 3. Prefer a single persistent browser context and page. Reuse the same session for related actions unless isolation is required to avoid a false result.
 4. Act as the main orchestrator for the whole QA run. Keep the live goal, blocker state, and completion gate in one place.
 5. Dispatch a tester sub-agent for the live workflow. The tester owns browser QA, interaction coverage, and precise blocker reporting.
-6. Open the real application with MCP when available. Inspect the page and understand what the page is for before interacting.
+6. Open the real application with Playwright MCP when available. Use MCP tools to navigate, interact, and capture screenshots. Inspect the page and understand what the page is for before interacting.
 7. Detect meaningful interactive elements:
    - buttons
    - links
@@ -61,49 +61,102 @@ Do not use this skill when:
    - date, masked, or formatted fields
 8. Determine which elements should be triggered and which fields must be filled to reach the objective.
 9. Execute the workflow like a real user. Prefer visible, deliberate interactions over brittle shortcuts.
-10. Where tooling allows it, include deliberate mouse movement during the live run so the saved preview is easier to review.
-11. Verify controls are truly operable:
+10. Capture screenshots at each key milestone using Playwright MCP (e.g., `mcp_playwright_screenshot`). Use incremental IDs (001.png, 002.png, etc.) and save to `docs/qa-artifacts/<timestamp>_<task_or_feature>/`.
+11. Where tooling allows it, include deliberate mouse movement during the live run so the saved preview and video are easier to review.
+12. Verify controls are truly operable:
     - buttons trigger the intended action
     - inputs accept typing and reflect values correctly
     - selects, radios, and checkboxes can be changed correctly
     - disabled or conditionally enabled controls transition correctly
     - validation and error states behave correctly
-12. Watch for errors during the run:
+13. Watch for errors during the run:
     - console errors
     - page crashes
     - uncaught exceptions
     - failed network behavior that breaks the objective
-13. If the tester finds a blocker, dispatch the fixer sub-agent with the exact failing behavior, evidence, and the rule to make the smallest safe fix.
-14. After each fix, rerun only the failed portion first. If that passes, rerun the full main objective end to end.
-15. Repeat the test-fix-rerun loop until the full objective passes or the blocker cannot be safely removed.
-16. Validate the outcome, not just the clicks. Confirm the expected result is visible or otherwise provable in the UI.
-17. Confirm the main objective was actually reached. If not, report where the flow failed and why.
-18. Only after the live QA pass finishes successfully may you create or update a reusable Playwright E2E spec file for future-proofing. Reuse repo patterns first and keep selectors and helpers aligned with the target repo.
+14. If the tester finds a blocker, capture a screenshot of the failure state, then dispatch the fixer sub-agent with the exact failing behavior, evidence, and the rule to make the smallest safe fix.
+15. After each fix, rerun only the failed portion first. If that passes, rerun the full main objective end to end.
+16. Repeat the test-fix-rerun loop until the full objective passes or the blocker cannot be safely removed.
+17. Validate the outcome, not just the clicks. Confirm the expected result is visible or otherwise provable in the UI.
+18. Confirm the main objective was actually reached. If not, report where the flow failed and why.
+19. Only after the live QA pass finishes successfully may you create or update a reusable Playwright E2E spec file for future-proofing. Reuse repo patterns first and keep selectors and helpers aligned with the target repo.
 
 ## Runtime Strategy
 
 ### Preferred Path
 
-Use browser MCP for live inspection and interaction when available because it lets the agent understand the real page state before and during testing.
+Use Playwright MCP server for live inspection, interaction, and artifact capture when available. This enables:
+- Real-time page state inspection before and during testing
+- Direct screenshot capture with `mcp_playwright_screenshot`
+- Video recording of full test sessions when supported
+- Precise control over browser actions and assertions
+
+Always capture screenshots at key test milestones using incremental IDs and save to `docs/qa-artifacts/<timestamp>_<task_or_feature>/`.
 
 ### Fallback Path
 
-If MCP is unavailable, continue with Playwright-based live testing instead of stopping immediately. Preserve the same expectations:
+If Playwright MCP is unavailable, continue with Playwright CLI-based live testing instead of stopping immediately. Preserve the same expectations:
 - real route coverage
 - real UI interaction
 - error checking
 - result validation
-- video capture
+- screenshot capture at key milestones (001.png, 002.png, etc.)
+- video capture of full sessions when possible
 - reusable E2E spec output
+
+Use Playwright's built-in screenshot and video options to maintain the artifact structure defined above.
 
 If neither MCP nor Playwright execution is possible, report `BLOCKED` with the exact reason.
 
-## Video And Session Artifacts
+## Screenshot And Video Artifacts
 
-- Record a video for every comprehensive QA run.
-- If the target repo already defines a standard Playwright output location, reuse it.
-- Otherwise store recordings under `test-results/comprehensive-qa/`.
-- Keep one browser session whenever possible so the recorded flow is coherent and useful for preview.
+When running E2E tests, always capture visual proof of changes using the Playwright MCP server. This provides concrete evidence of test execution and results.
+
+### Screenshot Requirements
+
+- Take screenshots at key moments during testing:
+  - Initial page state
+  - After significant interactions
+  - Final result/state verification
+  - Any error or failure states
+- Use incremental numeric IDs for filenames (001, 002, 003, etc.) for easy chronological tracking
+- Store screenshots in: `docs/qa-artifacts/<timestamp>_<task_or_feature>/<screenshot_id>.png`
+  - Example: `docs/qa-artifacts/20250617_143022_user_login/001.png`
+  - Example: `docs/qa-artifacts/20250617_143022_user_login/002.png`
+
+### Video Recording
+
+- Record a video of the full test run whenever the Playwright MCP supports it
+- Use incremental IDs if multiple videos are needed (001_video, 002_video, etc.)
+- Store videos in the same directory as screenshots: `docs/qa-artifacts/<timestamp>_<task_or_feature>/<video_id>.webm`
+- If the target repo already defines a standard Playwright output location, reuse it
+- Otherwise store recordings under `docs/qa-artifacts/` following the naming convention above
+- Keep one browser session whenever possible so the recorded flow is coherent and useful for preview
+
+### Artifact Directory Structure
+
+```
+docs/qa-artifacts/
+├── 20250617_143022_user_login/
+│   ├── 001.png          # Initial state
+│   ├── 002.png          # After form fill
+│   ├── 003.png          # Success state
+│   └── 001_video.webm   # Full run recording
+└── 20250617_144511_checkout_flow/
+    ├── 001.png
+    ├── 002.png
+    └── 001_video.webm
+```
+
+### Using Playwright MCP for Screenshots and Video
+
+When available, use the Playwright MCP server to:
+1. Navigate to pages and perform actions
+2. Capture screenshots at key states via MCP tools
+3. Record video of the full session when supported
+4. Save artifacts to the specified directory structure
+
+If Playwright MCP is unavailable, use Playwright CLI with equivalent screenshot and video options.
 
 ## Validation Standard
 
@@ -115,6 +168,9 @@ A comprehensive QA pass is not complete unless all of the following are true:
 - no blocking console or runtime errors were thrown during the validated flow
 - the observed result matched the intended test case
 - the main objective was actually reached
+- screenshots were captured at key milestones with incremental IDs (001.png, 002.png, etc.)
+- screenshots are saved in `docs/qa-artifacts/<timestamp>_<task_or_feature>/`
+- video recording was attempted when Playwright MCP supports it
 - every blocker fixed during the run was revalidated by rerunning the failed portion first
 - the full main objective was rerun successfully after the last fix
 
