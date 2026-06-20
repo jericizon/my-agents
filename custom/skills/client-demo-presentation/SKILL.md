@@ -73,8 +73,8 @@ self-contained phases, in order:
    - prove the final result on screen, then restore any mutated data
    The narration captions ARE the demo script; keep them short and client-friendly.
 
-4. **Phase C — Record (the main agent runs this; see Runtime Setup).** Install Playwright in
-   an isolated temp dir, then run `assets/demo-recorder.mjs` against the running app with the
+4. **Phase C — Record (the main agent runs this; see Runtime Setup).** Run the reusable
+   tooling setup once, then run `assets/demo-recorder.mjs` against the running app with the
    Phase B flow, outputting into the `docs/client-demo/<timestamp>_<feature>/` directory.
 
 5. **Verify the deliverable.** Confirm the directory contains the `.mp4`/`.webm` video, the
@@ -84,21 +84,28 @@ self-contained phases, in order:
 
 ## Runtime Setup
 
-The recorder is project-agnostic and self-contained. Install deps in an **isolated temp
-dir** so the target repo's `package.json`/lockfile stay clean:
+The recorder is project-agnostic and self-contained. To avoid downloading Chromium for
+every demo, keep tooling in a persistent cache and use **pnpm** (the same package manager
+used across the user's projects). The cache lives in `~/.cache/client-demo-presentation/` by
+default and is reusable across projects and devices.
+
+Run the bundled setup script once. It is safe to run repeatedly — it skips installation if
+the cache is already valid:
 
 ```bash
-WORK=$(mktemp -d) && cd "$WORK"
-echo '{"name":"demo","private":true,"type":"module"}' > package.json
-npm install --no-fund --no-audit playwright ffmpeg-static
-PLAYWRIGHT_BROWSERS_PATH="$WORK/ms-browsers" npx playwright install chromium
+bash /abs/path/to/skills/client-demo-presentation/assets/setup-tooling.sh
 ```
 
-Then record (run from `$WORK` so deps resolve), pointing at the running app and the flow:
+Then record, pointing at the running app and the flow. Set `DEMO_MODULES` so the recorder
+resolves Playwright from the cache, and `PLAYWRIGHT_BROWSERS_PATH` so it finds the cached
+Chromium binaries:
 
 ```bash
+CACHE_DIR="$HOME/.cache/client-demo-presentation"
 OUT=/abs/path/to/repo/docs/client-demo/$(date +%Y%m%d_%H%M%S)_login
-PLAYWRIGHT_BROWSERS_PATH="$WORK/ms-browsers" \
+
+DEMO_MODULES="$CACHE_DIR" \
+PLAYWRIGHT_BROWSERS_PATH="$CACHE_DIR/ms-browsers" \
   node /abs/path/to/skills/client-demo-presentation/assets/demo-recorder.mjs \
     --base http://localhost:3000 \
     --flow /abs/path/to/flow.mjs \
