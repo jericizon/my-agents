@@ -116,7 +116,7 @@ const overlayInit = () => {
       'position:fixed', 'left:50%', 'bottom:26px', 'transform:translateX(-50%)',
       'width:80%', 'box-sizing:border-box', 'padding:10px 20px', 'color:#fff',
       'font:700 20px/1.4 Roboto,Arial,sans-serif',
-      'background:rgba(0,0,0,.8)', 'border-radius:8px',
+      'background:rgba(0,0,0,.3)', 'border-radius:8px',
       'z-index:2147483647', 'pointer-events:none',
       'opacity:0', 'transition:opacity .25s ease', 'text-align:center',
     ].join(';');
