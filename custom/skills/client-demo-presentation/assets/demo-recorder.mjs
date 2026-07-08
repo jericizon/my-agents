@@ -114,9 +114,10 @@ const overlayInit = () => {
     cap.id = '__demoCaption';
     cap.style.cssText = [
       'position:fixed', 'left:50%', 'bottom:26px', 'transform:translateX(-50%)',
-      'max-width:80%', 'padding:10px 20px', 'background:rgba(20,22,48,.92)', 'color:#fff',
-      'font:500 16px/1.4 Roboto,Arial,sans-serif', 'border-radius:8px',
-      'box-shadow:0 6px 24px rgba(0,0,0,.3)', 'z-index:2147483647', 'pointer-events:none',
+      'width:80%', 'box-sizing:border-box', 'padding:10px 20px', 'color:#fff',
+      'font:700 20px/1.4 Roboto,Arial,sans-serif',
+      'background:rgba(0,0,0,.8)', 'border-radius:8px',
+      'z-index:2147483647', 'pointer-events:none',
       'opacity:0', 'transition:opacity .25s ease', 'text-align:center',
     ].join(';');
     document.documentElement.appendChild(cap);
