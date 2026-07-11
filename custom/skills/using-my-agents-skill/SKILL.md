@@ -74,6 +74,8 @@ If the instruction is self-contained and unambiguous ("rename this variable", "f
 
 8. **Prefer the more specific skill on conflict.** A domain skill (e.g. frontend-ui-engineering) beats a generic one when both cover the same step.
 
+9. **Route visual frontend work through `design-taste-frontend`.** For any UI/UX task whose output must *look* intentional — landing pages, portfolios, marketing sites, or redesigns — include `design-taste-frontend` as the anti-slop gate that runs before `frontend-ui-engineering` builds it. It sets design direction and enforces a pre-flight check against templated "AI-slop" output. Do NOT apply it to dashboards, data tables, admin panels, or multi-step product UI — it explicitly excludes those; use `frontend-design` + `frontend-ui-engineering` alone there.
+
 ## Task → Combined Skill Patterns
 
 | Task type | Efficient combination (after pruning) |
@@ -83,6 +85,8 @@ If the instruction is self-contained and unambiguous ("rename this variable", "f
 | Refactor | code-simplification → test-driven-development → code-review-and-quality |
 | Vague idea | interview-me → idea-refine → spec-driven-development |
 | Security-sensitive | security-and-hardening → doubt-driven-development → code-review-and-quality |
+| Frontend / UI / UX design (landing pages, portfolios, marketing sites, redesigns) | brainstorming → frontend-design → **design-taste-frontend** (anti-slop pre-flight gate) → frontend-ui-engineering → browser-testing-with-devtools |
+| Product UI (dashboards, tables, admin, app screens) | brainstorming → frontend-design → frontend-ui-engineering → browser-testing-with-devtools |
 | Browser / UI QA | comprehensive-qa-testing or browser-testing-with-devtools |
 | Ship / release | git-workflow-and-versioning → verification-before-completion → shipping-and-launch |
 
