@@ -40,7 +40,20 @@ Do NOT use this skill when:
 - Assume the application is **already running**. Never start a dev/preview/watch server.
 - The recorded flow must use a **visible moving cursor** (glide between targets) — not raw clicks.
 - **Every step must have a subtitle caption** so a non-technical viewer can follow along.
-- Capture a **screenshot at every key milestone** (open, each key action, final result).
+- **Explain the whole page, not just the happy path.** Before (or while) performing the task,
+  walk every meaningful control on the page — inputs, toggles, dropdowns, tabs, secondary
+  buttons — with `h.explain(locator, text)`, even controls the flow itself never touches.
+  A viewer should come away understanding the whole page, not just the three fields that
+  were filled in.
+- **Highlight what's being narrated.** Whenever a caption discusses a specific element, that
+  element must have the spotlight box on it (`h.explain`, or `h.highlight` + `h.caption`
+  directly) so the viewer's focus lands exactly where the narration is pointing.
+- **Follow through to downstream/related pages.** If completing the action changes or creates
+  content that renders somewhere else (e.g. an admin/CMS editor publishing a page that then
+  appears on the public site), the demo must navigate to that resulting page and show/explain
+  the outcome there before the video ends — not just the "Saved!" toast on the editor.
+- Capture a **screenshot at every key milestone** (open, each explained element, each key
+  action, and the final result on every page involved — including downstream pages).
 - Produce **one whole video** of the full walkthrough (`.mp4` preferred, `.webm` always).
 - Save all artifacts under `docs/client-demo/<timestamp>_<feature>/`.
 - Use the bundled recorder at `assets/demo-recorder.mjs`. **Never edit the recorder** — only
@@ -58,19 +71,28 @@ self-contained phases, in order:
    app (ask the user only if it cannot be inferred). Compute the output directory:
    `docs/client-demo/<YYYYMMDD_HHMMSS>_<feature_slug>/` (use `date +%Y%m%d_%H%M%S`).
 
-2. **Phase A — Identify the feature (explore sub-agent).** Dispatch a read-only sub-agent to
+2. **Phase A — Explore the page (explore sub-agent).** Dispatch a read-only sub-agent to
    locate, in the repo, the route/page/component for the requested feature, the exact entry
-   URL/path, required auth, the real selectors (labels, roles, test-ids) for each control,
-   and any seed/demo credentials. It must return a concrete, ordered list of UI steps with
-   real selectors — not guesses.
+   URL/path, required auth, and any seed/demo credentials. Crucially, it must enumerate
+   **every meaningful control on the page** — not only the ones needed for the happy path:
+   each input, dropdown, toggle, tab, secondary button/link — with its real selector (label,
+   role, test-id) and a one-sentence description of what it does/why it matters. It must also
+   identify any **downstream/related page** the action affects — e.g. a CMS admin editor that
+   publishes content onto a separate public-facing route — with that page's URL/path and how
+   to reach it (nav path or direct route) once the action completes. Return a concrete,
+   ordered list of UI elements + steps with real selectors — not guesses.
 
 3. **Phase B — Author the flow + narration (general sub-agent).** Using Phase A's findings,
    copy `assets/example-flow.mjs` to `<out>/flow.mjs` (or a temp path) and adapt it:
-   - one captioned step per user action (`h.caption(...)` before each step) — this is the subtitle script
-   - `h.glideClick` / `h.glideTo` for visible cursor movement
+   - `h.explain(locator, text)` for every control identified in Phase A, including ones the
+     flow doesn't act on — this glides the cursor to it, draws the spotlight highlight, and
+     narrates its purpose
+   - `h.glideClick` / `h.glideTo` for the actual action steps, each preceded by `h.caption(...)`
    - `h.type` for realistic typing
-   - `h.shot('<label>')` at every milestone
-   - prove the final result on screen, then restore any mutated data
+   - `h.shot('<label>')` at every milestone, including each explained element and the final result
+   - if Phase A found a downstream/related page, `h.goto` there after the action completes and
+     `h.explain`/`h.highlight` the new/changed content before the closing shot
+   - prove the final result on screen (on every page involved), then restore any mutated data
    The narration captions ARE the demo script; keep them short and client-friendly.
 
 4. **Phase C — Record (the main agent runs this; see Runtime Setup).** Run the reusable
@@ -131,6 +153,9 @@ The flow file exports `default async function runFlow(page, h)` and uses:
 | `h.caption(text)` | set the on-screen subtitle bar (the narration script) |
 | `h.glideClick(locator)` | glide the visible cursor to the element, then click |
 | `h.glideTo(locator)` | glide the cursor to the element without clicking |
+| `h.highlight(locator)` | draw the pulsing spotlight box around an element's bounding rect |
+| `h.clearHighlight()` | hide the spotlight box |
+| `h.explain(locator, text)` | glide + highlight + caption + read-pause — the "explain this control" beat |
 | `h.type(locator, text)` | realistic per-key typing |
 | `h.shot(label)` | capture numbered milestone screenshot `NNN_label.png` |
 | `h.sleep(ms)` | pause so viewers can read the screen |
@@ -158,7 +183,12 @@ A client demo is complete only when:
 - the feature was correctly identified from the real repo (real route + selectors)
 - every step in the recorded flow has a subtitle caption
 - the cursor is visibly moving between targets
-- a screenshot exists for each key milestone under `screenshots/`
+- **every meaningful control on the page was explained** (spotlight-highlighted + captioned),
+  not only the ones used in the happy-path action
+- **if the action produces or updates content on a different page**, that page was visited
+  and the result shown/explained there too
+- a screenshot exists for each key milestone under `screenshots/`, including explained
+  elements and the result on every page involved
 - one whole video exists (`.mp4`, or `.webm` if ffmpeg is unavailable)
 - artifacts are saved under `docs/client-demo/<timestamp>_<feature>/`
 - the recorder exited cleanly (no `FLOW_ERROR`) and any mutated data was restored

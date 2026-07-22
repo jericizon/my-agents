@@ -32,14 +32,15 @@
  *   --flow <path>    JS module exporting `default`/`runFlow(page, h)` (env DEMO_FLOW)
  *   --out  <dir>     Output directory                   (env DEMO_OUT;  default ./client-demo-output)
  *   --name <name>    Output file base name              (env DEMO_NAME; default "demo")
- *   --width <px>     Viewport width                     (env DEMO_WIDTH;  default 1280)
- *   --height <px>    Viewport height                    (env DEMO_HEIGHT; default 800)
+ *   --width <px>     Viewport width                     (env DEMO_WIDTH;  default 1920)
+ *   --height <px>    Viewport height                    (env DEMO_HEIGHT; default 1080)
  *   --headed         Run with a visible browser (needs a display; default headless)
  *
  * THE FLOW FILE (see example-flow.mjs next to this file):
  *   export default async function runFlow(page, h) { ... }
  *   `h` provides: h.BASE, h.viewport, h.goto(pathOrUrl), h.caption(text),
  *                 h.glideClick(locator, opts), h.glideTo(locator, opts),
+ *                 h.highlight(locator, opts), h.clearHighlight(), h.explain(locator, text, opts),
  *                 h.type(locator, text), h.shot(label), h.sleep(ms).
  *
  * SCREENSHOTS
@@ -88,8 +89,8 @@ const CONFIG = {
   OUT_DIR: path.resolve(args.out || process.env.DEMO_OUT || './client-demo-output'),
   NAME: args.name || process.env.DEMO_NAME || 'demo',
   VIEWPORT: {
-    width: Number(args.width || process.env.DEMO_WIDTH || 1280),
-    height: Number(args.height || process.env.DEMO_HEIGHT || 800),
+    width: Number(args.width || process.env.DEMO_WIDTH || 1920),
+    height: Number(args.height || process.env.DEMO_HEIGHT || 1080),
   },
   HEADLESS: !(args.headed || process.env.DEMO_HEADED),
 };
@@ -99,33 +100,60 @@ const CONFIG = {
 const overlayInit = () => {
   const install = () => {
     if (document.getElementById('__demoCursor')) return;
+    // Real arrow-pointer glyph (SVG), not a dot — tip sits at (4,2) in the 28x28 box.
+    const cursorSvg = encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28">'
+      + '<path d="M4 2 L4 21 L9.5 16.2 L13.2 23.5 L16.8 21.7 L13.2 14.5 L20.5 14.5 Z" '
+      + 'fill="#ffffff" stroke="#000000" stroke-width="1.4" stroke-linejoin="round"/></svg>',
+    );
     const c = document.createElement('div');
     c.id = '__demoCursor';
     c.style.cssText = [
-      'position:fixed', 'left:-50px', 'top:-50px', 'width:22px', 'height:22px',
-      'margin:-11px 0 0 -11px', 'border-radius:50%', 'background:rgba(63,81,181,.35)',
-      'border:2px solid #3f51b5', 'box-shadow:0 0 0 4px rgba(63,81,181,.15)',
-      'z-index:2147483647', 'pointer-events:none',
+      'position:fixed', 'left:-50px', 'top:-50px', 'width:28px', 'height:28px',
+      'margin:-2px 0 0 -4px', `background:url("data:image/svg+xml,${cursorSvg}") no-repeat`,
+      'background-size:contain', 'filter:drop-shadow(0 1px 2px rgba(0,0,0,.5))',
+      'z-index:2147483647', 'pointer-events:none', 'transform-origin:4px 2px',
       'transition:left .07s linear, top .07s linear, transform .1s ease',
     ].join(';');
     document.documentElement.appendChild(c);
 
+    // Netflix-style subtitle: tight box hugging the text, bottom-center, white bold caps-friendly text.
     const cap = document.createElement('div');
     cap.id = '__demoCaption';
     cap.style.cssText = [
-      'position:fixed', 'left:50%', 'bottom:26px', 'transform:translateX(-50%)',
-      'width:80%', 'box-sizing:border-box', 'padding:10px 20px', 'color:#fff',
-      'font:700 20px/1.4 Roboto,Arial,sans-serif',
-      'background:rgba(0,0,0,.3)', 'border-radius:8px',
+      'position:fixed', 'left:50%', 'bottom:6%', 'transform:translateX(-50%)',
+      'max-width:85%', 'width:max-content', 'box-sizing:border-box', 'padding:4px 14px',
+      'color:#fff', 'font:700 30px/1.35 "Helvetica Neue",Helvetica,Arial,sans-serif',
+      'letter-spacing:.2px', 'text-shadow:0 1px 2px rgba(0,0,0,.6)',
+      'background:rgba(0,0,0,.75)', 'border-radius:3px',
       'z-index:2147483647', 'pointer-events:none',
       'opacity:0', 'transition:opacity .25s ease', 'text-align:center',
     ].join(';');
     document.documentElement.appendChild(cap);
 
+    // Spotlight box: draws an animated frame around whatever element is currently
+    // being explained, so viewer focus lands on exactly the control being narrated.
+    const style = document.createElement('style');
+    style.textContent = '@keyframes __demoPulse {'
+      + '0%,100% { box-shadow:0 0 0 4px rgba(255,176,32,.25), 0 0 18px 4px rgba(255,176,32,.35); }'
+      + '50% { box-shadow:0 0 0 8px rgba(255,176,32,.15), 0 0 26px 8px rgba(255,176,32,.55); } }';
+    document.documentElement.appendChild(style);
+
+    const hl = document.createElement('div');
+    hl.id = '__demoHighlight';
+    hl.style.cssText = [
+      'position:fixed', 'left:-9999px', 'top:-9999px', 'width:0', 'height:0',
+      'border:3px solid #ffb020', 'border-radius:8px',
+      'animation:__demoPulse 1.4s ease-in-out infinite',
+      'z-index:2147483646', 'pointer-events:none', 'opacity:0',
+      'transition:left .25s ease, top .25s ease, width .25s ease, height .25s ease, opacity .2s ease',
+    ].join(';');
+    document.documentElement.appendChild(hl);
+
     addEventListener('mousemove', (e) => {
       c.style.left = `${e.clientX}px`; c.style.top = `${e.clientY}px`;
     }, true);
-    addEventListener('mousedown', () => { c.style.transform = 'scale(.6)'; }, true);
+    addEventListener('mousedown', () => { c.style.transform = 'scale(.85)'; }, true);
     addEventListener('mouseup', () => { c.style.transform = 'scale(1)'; }, true);
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install);
@@ -195,6 +223,33 @@ async function loadFlow(flowPath) {
       const b = await loc.boundingBox();
       if (b) { await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps }); await sleep(settle); }
       await loc.click();
+    },
+    // Draw the spotlight box around an element's bounding rect (viewer focus cue).
+    highlight: async (loc, { padding = 6 } = {}) => {
+      await loc.scrollIntoViewIfNeeded().catch(() => {});
+      const b = await loc.boundingBox();
+      if (!b) return;
+      await page.evaluate(({ x, y, w, hgt, pad }) => {
+        const el = document.getElementById('__demoHighlight');
+        if (!el) return;
+        el.style.left = `${x - pad}px`;
+        el.style.top = `${y - pad}px`;
+        el.style.width = `${w + pad * 2}px`;
+        el.style.height = `${hgt + pad * 2}px`;
+        el.style.opacity = '1';
+      }, { x: b.x, y: b.y, w: b.width, hgt: b.height, pad: padding }).catch(() => {});
+    },
+    clearHighlight: () => page.evaluate(() => {
+      const el = document.getElementById('__demoHighlight');
+      if (el) el.style.opacity = '0';
+    }).catch(() => {}),
+    // Compound "explain this element" beat: glide cursor + spotlight + subtitle + read pause.
+    // Use this to walk every meaningful control on a page, not only the ones acted on.
+    explain: async (loc, text, { steps = 24, read = 1800 } = {}) => {
+      await h.glideTo(loc, { steps });
+      await h.highlight(loc);
+      await h.caption(text);
+      await sleep(read);
     },
     type: (loc, text) => loc.pressSequentially(text, { delay: 75 }),
     // Capture a numbered milestone screenshot into <out>/screenshots/NNN_label.png
