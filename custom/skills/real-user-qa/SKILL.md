@@ -1,6 +1,6 @@
 ---
 name: real-user-qa
-description: Use when unit or integration tests pass but the running app still breaks for real users, when you need to validate data browsing, filters, and create/update forms against a live backend, when checking that field input formats (dates, currency, phone, email, decimals, enums) don't trigger API/validation errors, or when a data-format mismatch between frontend and backend needs finding, fixing, and locking in with a regression test.
+description: Use when unit or integration tests pass but the running app still breaks for real users, when you need to validate data browsing, filters, and create/update forms against a live backend, when checking that field input formats (dates, currency, phone, email, decimals, enums) don't trigger API/validation errors, or when a data-format mismatch between frontend and backend needs finding, fixing, and locking in with a regression test. Runs headless or via direct curl/HTTP so no browser window pops up on the desktop.
 ---
 
 # Real User QA
@@ -36,9 +36,45 @@ Do not use when:
 
 Use both together: comprehensive-qa-testing moves the mouse; real-user-qa decides what to type and what "broken" means.
 
+## Runtime Modes — never pop up a headed browser
+
+Default to a mode that does **not** open a visible browser window on the user's desktop. Pick per need:
+
+| Mode | How | Best for | Blind spot |
+|---|---|---|---|
+| **Headless browser** (default) | Playwright/Chromium `headless: true`; capture request payloads + response bodies | Real UI + real frontend serialization with no window; the highest-fidelity way to see the *actual* payload the frontend emits | slightly slower than curl |
+| **API-level** | `curl` / `fetch` / HTTP client straight at the endpoint | Fast edge-matrix hammering; reproducible regression fixtures; CI | bypasses the frontend input→payload transform — often *where* the format bug is born, so you must know/derive what the UI sends |
+
+**Rules:**
+- Never launch a **headed** browser unless the user explicitly asks to watch it. Headless is the default; it validates the same DOM, serialization, and network calls without a window.
+- **Best combo:** one headless run to capture the real payloads the frontend produces, then replay/mutate those exact payloads via curl for the edge matrix and as regression fixtures. This gives real-UI fidelity *and* fast, windowless iteration.
+- API-only is legitimate when the format contract is the whole question and you already know the frontend's output shape (from the headless capture or the serializer code) — don't invent a payload and call it "what the user sends."
+- For the browser mechanics (isolated Playwright install, artifact/video capture), use [comprehensive-qa-testing]; run it headless by setting `headless: true` / omitting `DEMO_HEADED`.
+
+### Capturing the real payload headlessly
+
+```js
+// Playwright, headless — no window appears. Log every API request + response the UI makes.
+const browser = await chromium.launch({ headless: true });
+const page = await browser.newPage();
+page.on('request', r => { if (r.url().includes('/api/')) console.log('→', r.method(), r.url(), r.postData()); });
+page.on('response', async r => { if (r.url().includes('/api/')) console.log('←', r.status(), await r.text().catch(() => '')); });
+// ...drive the form with realistic data, submit, read what actually went over the wire...
+```
+
+Then replay the captured payload — and its mutations — with curl, no browser at all:
+
+```bash
+curl -sS -X POST http://localhost:3000/api/invoices \
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" \
+  -d '{"dueDate":"07/22/2026","amount":"$1,234.50"}' -w '\n%{http_code}\n'
+# ^ feed the exact real-user format, read the real status + body — this is the mismatch, visible with zero UI
+```
+
 ## Core Rules
 
 - Assume the app is already running. Never start a dev/preview/watch server — provide startup instructions only if needed.
+- Default to **headless / API-level** execution (see Runtime Modes). Do not open a visible browser window unless the user asks to watch.
 - **Read the field before you fill it.** Type, `name`, `maxlength`, `pattern`, `required`, `min`/`max`/`step`, `<option>` values, placeholder, and any inline mask tell you what the backend likely expects. Fill from that, not from a generic string.
 - **Use real-world data, not `test`/`asdf`.** See the Realistic Data Playbook below.
 - **Read the backend's actual answer, not just the UI.** Check the network response status and body (or server logs) for every submit. A green toast can hide a silently coerced value.
