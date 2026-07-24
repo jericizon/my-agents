@@ -5,11 +5,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FORK_DIR="$SCRIPT_DIR/superpowers-fork"
 AGENT_SKILLS_FORK_DIR="$SCRIPT_DIR/agent-skills-fork"
+UI_UX_FORK_DIR="$SCRIPT_DIR/ui-ux-fork"
 SOURCE_DIR="$SCRIPT_DIR/superpowers-agents"
 SKILLS_DIR="$SOURCE_DIR/skills"
 SOURCE_RULES="$SCRIPT_DIR/shared/rules/global_rules.md"
 UPSTREAM_REPO="https://github.com/obra/superpowers.git"
 AGENT_SKILLS_UPSTREAM_REPO="https://github.com/addyosmani/agent-skills.git"
+UI_UX_UPSTREAM_REPO="https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git"
+# That repo ships 7 skills; only the design-intelligence core is imported.
+UI_UX_SKILL_ALLOWLIST=("ui-ux-pro-max")
 AGENTS_TARGET="$HOME/.agents"
 CLAUDE_SKILLS_TARGET="$HOME/.claude/skills"
 TIMESTAMP="$(date +%s)"
@@ -210,10 +214,28 @@ require_skills_source_dir() {
     fi
 }
 
+is_allowed_skill() {
+    local skill_name="$1"
+    shift
+    local allowed
+
+    # No allowlist means import everything the source offers.
+    [ "$#" -eq 0 ] && return 0
+
+    for allowed in "$@"; do
+        [ "$allowed" = "$skill_name" ] && return 0
+    done
+
+    return 1
+}
+
+# Trailing args, if any, restrict the import to those skill names.
 copy_missing_skill_dirs() {
     local source_dir="$1"
     local destination_dir="$2"
     local label="$3"
+    shift 3
+    local allowlist=("$@")
     local skill_dir
     local skill_name
     local destination_skill_dir
@@ -222,6 +244,10 @@ copy_missing_skill_dirs() {
         [ -d "$skill_dir" ] || continue
         skill_name="$(basename "$skill_dir")"
         destination_skill_dir="$destination_dir/$skill_name"
+
+        if ! is_allowed_skill "$skill_name" ${allowlist[@]+"${allowlist[@]}"}; then
+            continue
+        fi
 
         if [ -e "$destination_skill_dir" ]; then
             echo "Skipping $label skill '$skill_name' because Superpowers already provides it."
@@ -236,10 +262,12 @@ copy_missing_skill_dirs() {
 rebuild_generated_skills() {
     local superpowers_skills_source="$FORK_DIR/skills"
     local agent_skills_source="$AGENT_SKILLS_FORK_DIR/skills"
+    local ui_ux_skills_source="$UI_UX_FORK_DIR/.claude/skills"
     local custom_skills_dir="$SCRIPT_DIR/custom/skills"
 
     require_skills_source_dir "$superpowers_skills_source" "Superpowers"
     require_skills_source_dir "$agent_skills_source" "agent-skills"
+    require_skills_source_dir "$ui_ux_skills_source" "ui-ux-pro-max"
 
     if [ ! -d "$SKILLS_DIR" ]; then
         echo "Creating superpowers-agents/skills directory..."
@@ -250,6 +278,7 @@ rebuild_generated_skills() {
     rm -rf "$SKILLS_DIR"/*
     cp -R "$superpowers_skills_source/." "$SKILLS_DIR/"
     copy_missing_skill_dirs "$agent_skills_source" "$SKILLS_DIR" "agent-skills"
+    copy_missing_skill_dirs "$ui_ux_skills_source" "$SKILLS_DIR" "ui-ux-pro-max" "${UI_UX_SKILL_ALLOWLIST[@]}"
 
     if [ -d "$custom_skills_dir" ] && [ "$(ls -A "$custom_skills_dir")" ]; then
         echo "Copying custom skills..."
@@ -261,6 +290,8 @@ rebuild_generated_skills() {
     git -C "$FORK_DIR" log --oneline -1
     echo "Current agent-skills status:"
     git -C "$AGENT_SKILLS_FORK_DIR" log --oneline -1
+    echo "Current ui-ux-pro-max status:"
+    git -C "$UI_UX_FORK_DIR" log --oneline -1
 }
 
 echo "Running unified agents sync..."
@@ -269,8 +300,10 @@ echo ""
 ensure_rules_source_exists
 setup_mirror_repo "$FORK_DIR" "$UPSTREAM_REPO" "Superpowers"
 setup_mirror_repo "$AGENT_SKILLS_FORK_DIR" "$AGENT_SKILLS_UPSTREAM_REPO" "agent-skills"
+setup_mirror_repo "$UI_UX_FORK_DIR" "$UI_UX_UPSTREAM_REPO" "ui-ux-pro-max"
 refresh_repo "$FORK_DIR" "$UPSTREAM_REPO" "Superpowers"
 refresh_repo "$AGENT_SKILLS_FORK_DIR" "$AGENT_SKILLS_UPSTREAM_REPO" "agent-skills"
+refresh_repo "$UI_UX_FORK_DIR" "$UI_UX_UPSTREAM_REPO" "ui-ux-pro-max"
 rebuild_generated_skills
 
 echo ""

@@ -74,7 +74,13 @@ If the instruction is self-contained and unambiguous ("rename this variable", "f
 
 8. **Prefer the more specific skill on conflict.** A domain skill (e.g. frontend-ui-engineering) beats a generic one when both cover the same step.
 
-9. **Route visual frontend work through `design-taste-frontend`.** For any UI/UX task whose output must *look* intentional — landing pages, portfolios, marketing sites, or redesigns — include `design-taste-frontend` as the anti-slop gate that runs before `frontend-ui-engineering` builds it. It sets design direction and enforces a pre-flight check against templated "AI-slop" output. Do NOT apply it to dashboards, data tables, admin panels, or multi-step product UI — it explicitly excludes those; use `frontend-design` + `frontend-ui-engineering` alone there.
+9. **Always consult `ui-ux-pro-max` first on design work.** If the task involves *any* visual design, UI, or UX decision — pages, components, layout, color, typography, spacing, iconography, motion, accessibility, or data visualization — invoke `ui-ux-pro-max` before any other frontend skill. It is a searchable local database (84 styles, 192 palettes, 74 font pairings, 192 product types, 98 UX guidelines, 104 icons, 16 motion presets, 25 chart types across 22 stacks) that supplies the concrete design decisions the other skills then apply. It grounds the work in real reference data instead of invented defaults, so it is a research step, not an implementation step — it never replaces `frontend-ui-engineering` for building.
+
+   Applies to: new UI, redesigns, design reviews, "make this look better", picking a palette or font pairing, choosing a chart type, component styling, design tokens/systems.
+
+   Skip it only when the task touches no design decision at all (pure logic, config, backend, copy-only edits, or a mechanical change to existing markup).
+
+10. **Route visual frontend work through `design-taste-frontend`.** For any UI/UX task whose output must *look* intentional — landing pages, portfolios, marketing sites, or redesigns — include `design-taste-frontend` as the anti-slop gate that runs after `ui-ux-pro-max` supplies the reference data and before `frontend-ui-engineering` builds it. It sets design direction and enforces a pre-flight check against templated "AI-slop" output. Do NOT apply it to dashboards, data tables, admin panels, or multi-step product UI — it explicitly excludes those; use `ui-ux-pro-max` + `frontend-design` + `frontend-ui-engineering` alone there.
 
 ## Task → Combined Skill Patterns
 
@@ -85,8 +91,11 @@ If the instruction is self-contained and unambiguous ("rename this variable", "f
 | Refactor | code-simplification → test-driven-development → code-review-and-quality |
 | Vague idea | interview-me → idea-refine → spec-driven-development |
 | Security-sensitive | security-and-hardening → doubt-driven-development → code-review-and-quality |
-| Frontend / UI / UX design (landing pages, portfolios, marketing sites, redesigns) | brainstorming → frontend-design → **design-taste-frontend** (anti-slop pre-flight gate) → frontend-ui-engineering → browser-testing-with-devtools |
-| Product UI (dashboards, tables, admin, app screens) | brainstorming → frontend-design → frontend-ui-engineering → browser-testing-with-devtools |
+| Frontend / UI / UX design (landing pages, portfolios, marketing sites, redesigns) | brainstorming → **ui-ux-pro-max** (design data) → frontend-design → **design-taste-frontend** (anti-slop pre-flight gate) → frontend-ui-engineering → browser-testing-with-devtools |
+| Product UI (dashboards, tables, admin, app screens) | brainstorming → **ui-ux-pro-max** (design data) → frontend-design → frontend-ui-engineering → browser-testing-with-devtools |
+| Styling / visual polish only (palette, typography, spacing, motion, icons) | **ui-ux-pro-max** → frontend-ui-engineering |
+| Data visualization (charts, dashboards, graphs) | **ui-ux-pro-max** (chart type + palette) → dataviz → frontend-ui-engineering |
+| Design review / "make this look better" | **ui-ux-pro-max** (audit against guidelines) → design-taste-frontend → code-review-and-quality |
 | Browser / UI QA | comprehensive-qa-testing or browser-testing-with-devtools |
 | Ship / release | git-workflow-and-versioning → verification-before-completion → shipping-and-launch |
 
@@ -108,4 +117,6 @@ Then invoke and follow each selected skill exactly, in order.
 - **Selecting the full union without pruning.** Over-applying skills wastes effort and obscures the real work.
 - **Re-implementing a skill's steps here.** This bridge only routes and combines; the selected skills own their own steps.
 - **Skipping verification.** Every combined plan must end with a verification or review skill before claiming completion.
+- **Designing without querying `ui-ux-pro-max`.** Picking colors, fonts, spacing, or chart types from memory produces generic output. Query the database first, then build.
+- **Treating `ui-ux-pro-max` as the builder.** It supplies design decisions; `frontend-ui-engineering` still writes the code.
 - **Skipping the clarity gate.** If the instruction is vague and you proceed directly to classification or implementation, you will build against unstated assumptions. Run `interview-me` first when the criteria in the Clarity Gate section are met.

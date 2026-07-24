@@ -5,6 +5,7 @@ Local manager for Superpowers skills with:
 - optional local overrides at `custom/skills`
 - an upstream Superpowers mirror at `superpowers-fork`
 - an upstream Addy Osmani `agent-skills` mirror at `agent-skills-fork`
+- an upstream `ui-ux-pro-max-skill` mirror at `ui-ux-fork` (only the `ui-ux-pro-max` skill is imported)
 
 The scripts in this repo keep one generated skills source in this workspace, then expose it to both Codex and Claude Code.
 
@@ -20,7 +21,8 @@ The scripts in this repo keep one generated skills source in this workspace, the
 - `custom/skills/`: editable local custom/override skills copied into the generated mirror on setup/update
 - `superpowers-fork/`: upstream Superpowers mirror used as one update source
 - `agent-skills-fork/`: upstream Addy Osmani `agent-skills` mirror used as a second update source
-- `sync-agents.sh`: the only maintenance entrypoint; clones or refreshes both upstream mirrors, rebuilds generated skills, refreshes runtime links, and links global rules
+- `ui-ux-fork/`: upstream `nextlevelbuilder/ui-ux-pro-max-skill` mirror; its skills live under `.claude/skills/` and only the names in `UI_UX_SKILL_ALLOWLIST` are imported
+- `sync-agents.sh`: the only maintenance entrypoint; clones or refreshes all upstream mirrors, rebuilds generated skills, refreshes runtime links, and links global rules
 
 ## Quick Start (Single Command)
 
@@ -33,12 +35,13 @@ The scripts in this repo keep one generated skills source in this workspace, the
 
 This will:
 - clone missing upstream mirrors or refresh existing ones
-- update both upstream mirrors and reapply custom skills
+- update all upstream mirrors and reapply custom skills
 - update global rules links across configured CLIs
 - rebuild `superpowers-agents/skills` from:
   1. `superpowers-fork/skills`
   2. `agent-skills-fork/skills` for non-conflicting skill names only
-  3. `custom/skills/*`
+  3. `ui-ux-fork/.claude/skills` for allowlisted, non-conflicting skill names only
+  4. `custom/skills/*`
 - create/refresh `~/.agents -> <this-repo>/superpowers-agents`
 - create/refresh `~/.claude/skills -> <this-repo>/superpowers-agents/skills`
 - fall back to copying into `~/.claude/skills` only if the Claude symlink cannot be created
@@ -56,7 +59,7 @@ Recommended:
 ```
 
 This will:
-- always run both upstream skill updates, rebuild the merged generated tree, and refresh global rules in one pass
+- always run all upstream skill updates, rebuild the merged generated tree, and refresh global rules in one pass
 
 If `~/.agents` or `~/.claude/skills` already exists, the installer backs it up to `*.backup.<timestamp>` before replacing it.
 
@@ -109,9 +112,12 @@ Your custom skill will be copied into `superpowers-agents/skills`, which is then
 Merge precedence is:
 1. `superpowers-fork/skills`
 2. `agent-skills-fork/skills` for non-conflicting skill names only
-3. `custom/skills`
+3. `ui-ux-fork/.claude/skills` for allowlisted, non-conflicting skill names only
+4. `custom/skills`
 
-If a skill exists in both upstream mirrors, the Superpowers version is retained unless you override it in `custom/skills`.
+If a skill exists in more than one upstream mirror, the earlier source in this list wins unless you override it in `custom/skills`.
+
+To import more skills from the `ui-ux-pro-max-skill` repo (it ships `ui-styling`, `design`, `design-system`, `brand`, `slides`, `banner-design`), add their names to `UI_UX_SKILL_ALLOWLIST` in `sync-agents.sh`.
 
 ## Tests
 
@@ -135,7 +141,7 @@ cd superpowers-fork/tests/brainstorm-server && npm test
 
 ## Notes
 
-- `sync-agents.sh` intentionally runs `git reset --hard upstream/main` inside both local upstream mirrors to keep them clean.
+- `sync-agents.sh` intentionally runs `git reset --hard upstream/main` inside all local upstream mirrors to keep them clean.
 - `custom/skills` is your safe place for local changes that should survive updates.
 - `superpowers-agents/skills` is intentionally regenerated on sync and should not be treated as a hand-edited source directory.
 - Claude Code should read the same generated tree via `~/.claude/skills`, or receive a refreshed copy there if symlinks are unavailable.
