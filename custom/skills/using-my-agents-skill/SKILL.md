@@ -1,6 +1,6 @@
 ---
 name: using-my-agents-skill
-description: Use at the start of any task or conversation as the single entry point for skill discovery. Triggers both using-superpowers and using-agent-skills, reconciles their recommendations, and selects the most efficient combination of skills for the task at hand.
+description: Use at the start of task-oriented work requiring orchestration, scoped delegation, or feature-level QA.
 ---
 
 # Using My Agents Skill
@@ -27,21 +27,38 @@ Do NOT use when:
 - you were dispatched as a subagent to execute one narrow, already-scoped task
 - a single specific skill is obviously and exclusively the right one (invoke it directly)
 
+## Mandatory Orchestration Contract
+
+For task-oriented work, this skill is a required delegation contract: designate one orchestrator sub-agent before any implementation delegation. The orchestrator must understand the request, clarify unresolved ambiguity, classify the work, establish acceptance criteria and constraints, map dependencies, and decompose the work before routing implementation subtasks. Do not delegate against unresolved assumptions.
+
+The orchestrator routes scoped subtasks rather than broadcasting the full original message to unrelated agents. Each implementation sub-agent receives its subtask, relevant acceptance criteria, shared feature context, dependencies and prerequisite outputs, applicable skills and constraints, and expected reporting format. All sub-agents report evidence, changed surfaces, blockers, and status to the orchestrator; the orchestrator is the only reporting boundary for the consolidated result.
+
+For each behavior-changing feature, bug fix, or cohesive workstream, designate exactly one dedicated QA sub-agent at workstream start, regardless of the number of dependent implementation tasks. Keep that QA owner across the workstream. Its QA context package includes clarified intent and scope, acceptance criteria and out-of-scope behavior, the task/dependency breakdown, affected surfaces, implementation summaries or diffs, expected real-user workflows, risks and edge cases, automated results, and environment prerequisites. The QA owner invokes `real-user-qa`, validates task checkpoints as prerequisites become available, and performs a final integrated end-to-end pass. Additional QA owners require genuinely independent workstreams, specialized validation expertise, or an explicit user request for parallel QA.
+
+When QA finds a failure, route the finding and evidence to the responsible implementation sub-agent, update shared context, and re-validate. Cap the implementation-to-QA loop at three cycles per feature/workstream; after the third unsuccessful cycle, stop and escalate with attempts, evidence, unresolved risk, and limitations. Completion requires appropriate automated verification and dedicated real-user validation, unless runtime validation is unavailable; report that limitation instead of claiming full QA completion.
+
+Route task-related follow-ups, clarifications, corrections, and scope changes through the same orchestrator and preserve the same QA owner unless the work becomes a separate workstream. Pure acknowledgements, explanations, and unrelated conversation are exempt from implementation delegation and real-user QA.
+
+The orchestrator alone presents the consolidated report to the main agent or user. Include clarified scope, delegated work and dependency status, changed files or behavior, automated evidence, real-user QA scenarios and outcomes, retry count, limitations, risks, and final, blocked, or escalated status.
+
 ## Workflow
+
+For task-oriented invocation, the orchestrator owns or coordinates discovery and reconciliation before any implementation delegation. It must preserve the requirements to invoke both `using-superpowers` and `using-agent-skills`, then route the resulting work through the gates below.
 
 ```
 Task arrives
     │
-    ├─ 1. Invoke using-superpowers   → discipline + instruction priority + 1% rule
-    ├─ 2. Invoke using-agent-skills  → lifecycle phase + candidate skills
-    ├─ 3. Clarity gate               → is the instruction vague or ambiguous?
-    │   ├─ Yes  → run interview-me first, then continue with the clarified intent
-    │   └─ No   → proceed with the stated task
-    ├─ 4. Classify the task          → BUGFIX / FEATURE / REFACTOR / TEST / REVIEW / SHIP / INVESTIGATE
-    ├─ 5. Merge candidate lists      → union of skills both meta-skills surface
-    ├─ 6. Reconcile & prune          → dedup overlaps, drop skills that add no value for THIS task
-    ├─ 7. Order: process → implementation → verify → ship
-    └─ 8. Announce the combined plan, then follow each selected skill exactly
+    ├─ 1. Create/designate the orchestrator before discovery or delegation
+    ├─ 2. Orchestrator invokes using-superpowers → discipline + instruction priority + 1% rule
+    ├─ 3. Orchestrator invokes using-agent-skills → lifecycle phase + candidate skills
+    ├─ 4. Clarity gate → is the instruction vague or ambiguous?
+    │   ├─ Yes → run interview-me first, then continue with the clarified intent
+    │   └─ No  → proceed with the stated task
+    ├─ 5. Classify the task → BUGFIX / FEATURE / REFACTOR / TEST / REVIEW / SHIP / INVESTIGATE
+    ├─ 6. Merge candidate lists → union of skills both meta-skills surface
+    ├─ 7. Reconcile & prune → dedup overlaps, drop skills that add no value for THIS task
+    ├─ 8. Order: process → implementation → verify → ship
+    └─ 9. Announce the combined plan, then delegate scoped work and follow each selected skill exactly
 ```
 
 ## Clarity Gate: When to Run `interview-me`
