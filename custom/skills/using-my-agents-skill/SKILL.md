@@ -1,6 +1,6 @@
 ---
 name: using-my-agents-skill
-description: Use at the start of task-oriented work requiring orchestration, scoped delegation, or feature-level QA.
+description: Use at the start of every task-oriented invocation, including simple, narrow, single-skill, follow-up, and delegated tasks.
 ---
 
 # Using My Agents Skill
@@ -17,19 +17,20 @@ Run alone, each gives a partial view. This skill runs both, merges the result, a
 
 ## When to Use
 
-Use when:
-- a new task or conversation begins and you need to decide which skills apply
-- a task spans multiple phases (e.g. design → build → test → ship)
-- both meta-skills might recommend overlapping skills and you need one reconciled plan
-- you want the strongest result with the fewest, most relevant skills
+Use for every task-oriented invocation, regardless of task size, complexity, type, or apparent simplicity:
+- a simple, narrow, obvious, or single-skill task
+- a multi-phase task (e.g. design → build → test → ship)
+- a task handled directly or delegated to another sub-agent
+- a task-related clarification, correction, follow-up, or scope change
 
-Do NOT use when:
-- you were dispatched as a subagent to execute one narrow, already-scoped task
-- a single specific skill is obviously and exclusively the right one (invoke it directly)
+Do NOT use only when the turn contains no task request:
+- pure acknowledgements
+- standalone explanations
+- unrelated conversation
 
 ## Mandatory Orchestration Contract
 
-For task-oriented work, this skill is a required delegation contract: designate one orchestrator sub-agent before any implementation delegation. The orchestrator must understand the request, clarify unresolved ambiguity, classify the work, establish acceptance criteria and constraints, map dependencies, and decompose the work before routing implementation subtasks. Do not delegate against unresolved assumptions.
+For every task-oriented invocation, this skill is a required orchestration contract: spawn or designate exactly one orchestrator sub-agent before discovery, implementation, or any other delegation, regardless of task size, complexity, type, simplicity, or whether the task appears to need only one skill. The orchestrator must understand the request, clarify unresolved ambiguity, classify the work, establish acceptance criteria and constraints, map dependencies, and decompose the work before routing implementation subtasks. Do not delegate against unresolved assumptions.
 
 The orchestrator routes scoped subtasks rather than broadcasting the full original message to unrelated agents. Each implementation sub-agent receives its subtask, relevant acceptance criteria, shared feature context, dependencies and prerequisite outputs, applicable skills and constraints, and expected reporting format. All sub-agents report evidence, changed surfaces, blockers, and status to the orchestrator; the orchestrator is the only reporting boundary for the consolidated result.
 
@@ -37,18 +38,18 @@ For each behavior-changing feature, bug fix, or cohesive workstream, designate e
 
 When QA finds a failure, route the finding and evidence to the responsible implementation sub-agent, update shared context, and re-validate. Cap the implementation-to-QA loop at three cycles per feature/workstream; after the third unsuccessful cycle, stop and escalate with attempts, evidence, unresolved risk, and limitations. Completion requires appropriate automated verification and dedicated real-user validation, unless runtime validation is unavailable; report that limitation instead of claiming full QA completion.
 
-Route task-related follow-ups, clarifications, corrections, and scope changes through the same orchestrator and preserve the same QA owner unless the work becomes a separate workstream. Pure acknowledgements, explanations, and unrelated conversation are exempt from implementation delegation and real-user QA.
+Route task-related follow-ups, clarifications, corrections, and scope changes through the same orchestrator and preserve the same QA owner unless the work becomes a separate workstream. Only genuinely non-task turns—pure acknowledgements, standalone explanations, and unrelated conversation—are exempt from orchestration, implementation delegation, and real-user QA.
 
 The orchestrator alone presents the consolidated report to the main agent or user. Include clarified scope, delegated work and dependency status, changed files or behavior, automated evidence, real-user QA scenarios and outcomes, retry count, limitations, risks, and final, blocked, or escalated status.
 
 ## Workflow
 
-For task-oriented invocation, the orchestrator owns or coordinates discovery and reconciliation before any implementation delegation. It must preserve the requirements to invoke both `using-superpowers` and `using-agent-skills`, then route the resulting work through the gates below.
+For every task-oriented invocation, the orchestrator owns or coordinates discovery and reconciliation before any implementation delegation. It must preserve the requirements to invoke both `using-superpowers` and `using-agent-skills`, then route the resulting work through the gates below.
 
 ```
 Task arrives
     │
-    ├─ 1. Create/designate the orchestrator before discovery or delegation
+    ├─ 1. Spawn/designate exactly one orchestrator before discovery or delegation
     ├─ 2. Orchestrator invokes using-superpowers → discipline + instruction priority + 1% rule
     ├─ 3. Orchestrator invokes using-agent-skills → lifecycle phase + candidate skills
     ├─ 4. Clarity gate → is the instruction vague or ambiguous?
@@ -57,9 +58,20 @@ Task arrives
     ├─ 5. Classify the task → BUGFIX / FEATURE / REFACTOR / TEST / REVIEW / SHIP / INVESTIGATE
     ├─ 6. Merge candidate lists → union of skills both meta-skills surface
     ├─ 7. Reconcile & prune → dedup overlaps, drop skills that add no value for THIS task
-    ├─ 8. Order: process → implementation → verify → ship
-    └─ 9. Announce the combined plan, then delegate scoped work and follow each selected skill exactly
+    ├─ 8. Order: process → implementation → task-specific validation → final quality gate → ship
+    └─ 9. Announce the combined plan, delegate scoped work, and follow each selected skill exactly
 ```
+
+## Final Quality Gate for Code Changes
+
+For every task that changes source code, tests, scripts, configuration, schemas, build or deployment logic, or skill/runtime logic, the orchestrator must run this final gate after implementation and task-specific validation, immediately before completion or shipping. The gate is additive and non-prunable: task size, task type, file type, delegation count, prior QA, or an earlier review cannot bypass it.
+
+1. **Review:** Run `code-review-and-quality` against the clarified scope, acceptance criteria, constraints, security, regressions, and existing patterns.
+2. **Simplify:** Run `code-simplification` to address unnecessary complexity, duplication, unclear naming, and avoidable indirection without changing intended behavior.
+3. **Clean:** Check for and remove clearly safe, in-scope dead or unnecessary code, dependencies, branches, tests, and artifacts. Do not remove code based only on an assumption that it is unused.
+4. **Verify:** Run `verification-before-completion` on the post-cleanup state, including relevant automated tests and required real-user or manual validation.
+
+The orchestrator records review findings, cleanup performed or deemed unnecessary, dead-code findings, verification commands and results, QA outcomes, limitations, and unresolved risks. If any stage fails, is skipped, unavailable, or unreported, do not claim completion; route required fixes through the implementation and existing QA loop, then repeat the gate. Documentation-only, explanation-only, and investigation-only tasks use task-appropriate validation but do not require this code-quality gate.
 
 ## Clarity Gate: When to Run `interview-me`
 
@@ -83,7 +95,7 @@ If the instruction is self-contained and unambiguous ("rename this variable", "f
 
 4. **De-duplicate by intent, not by name.** Some skills exist in both catalogs. Pick one instance and apply it once.
 
-5. **Order by phase:** process/understanding skills first (brainstorming, debugging, spec, planning), then implementation, then verification, then review, then ship. A task is not done until its verification skill passes.
+5. **Order by phase:** process/understanding skills first (brainstorming, debugging, spec, planning), then implementation, task-specific validation, the final quality gate for code changes, and then ship. A task is not done until the required final verification passes.
 
 6. **Honor the 1% rule from using-superpowers.** If there is even a 1% chance a skill applies, include it in the candidate list before pruning.
 
@@ -116,7 +128,7 @@ If the instruction is self-contained and unambiguous ("rename this variable", "f
 | Browser / UI QA | comprehensive-qa-testing or browser-testing-with-devtools |
 | Ship / release | git-workflow-and-versioning → verification-before-completion → shipping-and-launch |
 
-These are starting points. Always prune to what the specific task needs. The clarity gate is applied before classification, so any task that is vague first runs `interview-me`, and the resulting clarified intent is used to classify the task and select the remaining skills.
+These are starting points. Always prune task-specific skills to what the specific task needs, but never prune the final quality gate for an in-scope code change. The clarity gate is applied before classification, so any task that is vague first runs `interview-me`, and the resulting clarified intent is used to classify the task and select the remaining skills.
 
 ## Announce Format
 
@@ -133,7 +145,8 @@ Then invoke and follow each selected skill exactly, in order.
 - **Running only one meta-skill.** You lose half the coverage. Always run both.
 - **Selecting the full union without pruning.** Over-applying skills wastes effort and obscures the real work.
 - **Re-implementing a skill's steps here.** This bridge only routes and combines; the selected skills own their own steps.
-- **Skipping verification.** Every combined plan must end with a verification or review skill before claiming completion.
+- **Skipping the final quality gate.** Every code-changing plan must end with review, simplification, dead/unnecessary-code checks, and post-cleanup verification before claiming completion.
+- **Skipping verification.** Every combined plan must end with a task-appropriate verification skill before claiming completion.
 - **Designing without querying `ui-ux-pro-max`.** Picking colors, fonts, spacing, or chart types from memory produces generic output. Query the database first, then build.
 - **Treating `ui-ux-pro-max` as the builder.** It supplies design decisions; `frontend-ui-engineering` still writes the code.
 - **Skipping the clarity gate.** If the instruction is vague and you proceed directly to classification or implementation, you will build against unstated assumptions. Run `interview-me` first when the criteria in the Clarity Gate section are met.
