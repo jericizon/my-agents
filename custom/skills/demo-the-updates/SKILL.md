@@ -59,7 +59,12 @@ Do NOT use this skill when:
    - Fall back to `http://localhost:3000` only if nothing is found
    - If frontend and backend run on different ports, note both
 3. **Compute the session directory:**
-   `docs/client-demo/<YYYYMMDD_HHMMSS>_demo-the-updates/` (use `date +%Y%m%d_%H%M%S`).
+   - Derive `FEATURE_SET_SLUG` from the verified feature checklist:
+     - for a single feature, use that feature's lowercase kebab-case slug
+     - for multiple features, use a concise lowercase kebab-case feature-set summary
+     - if no feature can be identified, use `demo-session`
+   - Normalize the slug to lowercase kebab-case using only `[a-z0-9-]`, collapse repeated hyphens, trim leading/trailing hyphens, and cap it at 60 characters. If normalization produces an empty value, use `demo-session`.
+   - Create `docs/client-demo/<YYYYMMDD_HHMMSS>_<FEATURE_SET_SLUG>/` (use `date +%Y%m%d_%H%M%S`).
    All clips go under this one directory as numbered sub-directories.
 
 ### Phase 1 — Server Health Check & Startup
@@ -88,7 +93,8 @@ Do NOT use this skill when:
    ```
 2. **Create the session directory:**
    ```bash
-   SESSION_DIR="docs/client-demo/$(date +%Y%m%d_%H%M%S)_demo-the-updates"
+   FEATURE_SET_SLUG="<computed-feature-set-slug>"
+   SESSION_DIR="docs/client-demo/$(date +%Y%m%d_%H%M%S)_${FEATURE_SET_SLUG}"
    mkdir -p "$SESSION_DIR"
    ```
 3. **Record clips in order.** For each feature on the verified checklist:
@@ -134,7 +140,7 @@ After each clip is recorded, verify it before moving to the next:
 
 1. **Write a manifest file** at `$SESSION_DIR/MANIFEST.md` indexing every clip:
    ```markdown
-   # Demo Session: <feature set name>
+   # Demo Session: <feature set slug>
    Date: <YYYY-MM-DD HH:MM>
    Base URL: <url>
    Server: <started | already running>
@@ -157,7 +163,7 @@ After each clip is recorded, verify it before moving to the next:
 
 ```
 docs/client-demo/
-└── 20250819_143022_demo-the-updates/
+└── 20250819_143022_<feature-set-slug>/
     ├── MANIFEST.md                    # session index + verification status
     ├── 01_login/
     │   ├── login-demo.mp4
@@ -224,6 +230,7 @@ A demo-the-updates session is complete only when:
 - the server was confirmed running (started if needed, health-checked)
 - **every feature on the checklist was verified end-to-end before recording**
 - each feature was recorded as a **separate clip** under the **one session directory**
+- the session directory uses the computed feature-set slug instead of the skill command name
 - login was recorded once (if needed); feature clips go directly to feature pages
 - **every clip was reviewed** for failed flows, and any faulty clip was deleted and re-recorded
 - the session directory contains a `MANIFEST.md` indexing all clips
