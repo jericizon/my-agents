@@ -1,6 +1,6 @@
 ---
 name: client-demo-presentation
-description: Use when the user wants a client-presentable or stakeholder demo walkthrough video of a feature in a running app — a real-browser screen recording with a visible moving mouse cursor and on-screen subtitle/caption instructions (e.g. "present how to log in", "record a demo of checkout", "make a client demo of X"). Produces a narrated video plus milestone screenshots saved under docs/client-demo/.
+description: Use when the user wants a client-presentable or stakeholder demo walkthrough video of a feature in a running app — a real-browser screen recording with a visible moving mouse cursor, on-screen subtitle/caption instructions, or an optional spoken voiceover generated from the captions (e.g. "present how to log in", "record a demo of checkout", "make a client demo of X").
 ---
 
 # Client Demo Presentation
@@ -10,7 +10,8 @@ description: Use when the user wants a client-presentable or stakeholder demo wa
 Produce a polished, client-presentable walkthrough of one feature in the already-running
 app: a real Chromium screen recording with a **visible animated mouse cursor**, **on-screen
 subtitle captions** narrating each step, **milestone screenshots**, and **one whole demo
-video** (`.mp4` plus `.webm`).
+video** (`.mp4` plus `.webm`). With `--voiceover`, the same captions become a synchronized
+spoken voiceover track in the final video.
 
 This is **presentation, not QA**. It does not fix bugs or write tests — it tells the story
 of how to use a feature for a non-technical audience. If the feature is broken or needs
@@ -56,9 +57,20 @@ Do NOT use this skill when:
   action, and the final result on every page involved — including downstream pages).
 - Produce **one whole video** of the full walkthrough (`.mp4` preferred, `.webm` always).
 - Save all artifacts under `docs/client-demo/<timestamp>_<feature>/`.
-- Use the bundled recorder at `assets/demo-recorder.mjs`. **Never edit the recorder** — only
-  write a project-specific flow file.
+- Use the bundled recorder at `assets/demo-recorder.mjs`. **Do not edit the recorder for an
+  individual demo** — only write a project-specific flow file.
+- If the user requests spoken narration, pass `--voiceover` (or set `DEMO_VOICEOVER=1`). The
+  recorder reads every non-empty `h.caption(...)` call into the final video; this is caption
+  voiceover only, not app/browser audio. Do not invent background music or claim audio exists
+  without verifying the output stream.
+- If voiceover is requested, require a local TTS engine and `ffmpeg-static`; report `BLOCKED`
+  before recording if either prerequisite is unavailable. The recorder supports `say` on
+  macOS, `espeak-ng`/`espeak` on Linux, and PowerShell/SAPI on Windows. Set `DEMO_TTS_BIN`
+  only when it points to a compatible local engine.
 - If the demo mutates data, restore it at the end so the environment is left unchanged.
+- **Render inline in chat.** After recording, if `$JHECKBOT_MEDIA_DIR` is set, copy the
+  final `.mp4` to `$JHECKBOT_MEDIA_DIR/capture.mp4` so the video renders inline in the chat
+  reply. This applies to any project — the env var is the contract, not the project.
 - This skill does not fix product bugs. If the flow is blocked by a real defect, stop and
   report `BLOCKED`; hand off to `comprehensive-qa-testing` for fixing.
 
@@ -101,8 +113,9 @@ self-contained phases, in order:
 
 5. **Verify the deliverable.** Confirm the directory contains the `.mp4`/`.webm` video, the
    numbered screenshots under `screenshots/`, and that the recorder exited 0 (no `FLOW_ERROR`).
-   If the flow errored, fix the flow file (selectors/timing) and re-record. Then report the
-   artifact paths to the user.
+   If the flow errored, fix the flow file (selectors/timing) and re-record. Then **copy the
+   final `.mp4` to `$JHECKBOT_MEDIA_DIR/capture.mp4`** if that env var is set, so the video
+   renders inline in the chat reply. Report the artifact paths to the user.
 
 ## Runtime Setup
 
@@ -135,13 +148,25 @@ PLAYWRIGHT_BROWSERS_PATH="$CACHE_DIR/ms-browsers" \
     --name login-demo
 ```
 
+Add `--voiceover` to that command (or set `DEMO_VOICEOVER=1`) when the client needs spoken
+narration generated from the captions. Voiceover is created after the browser recording so
+caption timing stays tied to the recorded flow.
+
 Notes:
-- Playwright records `.webm` natively (no system ffmpeg). `ffmpeg-static` only transcodes to
-  `.mp4`; if it is missing, the `.webm` is the deliverable (recorder warns, does not fail).
+- Playwright records `.webm` natively (no system ffmpeg). `ffmpeg-static` creates the `.mp4`
+  and, in voiceover mode, muxes the generated audio into both video formats. Without
+  voiceover, if it is missing, the video-only `.webm` is the deliverable.
+- Voiceover requires an installed local TTS engine: `say` on macOS, `espeak-ng` or `espeak`
+  on Linux, or Windows PowerShell/SAPI. The setup script does not install OS packages.
 - Flags also settable via env: `DEMO_BASE / DEMO_FLOW / DEMO_OUT / DEMO_NAME / DEMO_WIDTH /
-  DEMO_HEIGHT / DEMO_HEADED`. Set `DEMO_MODULES` if running the recorder from a dir other
-  than where `node_modules` was installed.
-- Run with no `--flow` to record a placeholder open-only clip that verifies the setup.
+  DEMO_HEIGHT / DEMO_HEADED / DEMO_VOICEOVER / DEMO_TTS_BIN`. Set `DEMO_MODULES` if running
+  the recorder from a dir other than where `node_modules` was installed.
+- Run with no `--flow` to record a placeholder open-only clip that verifies the setup. It
+  includes voiceover only when a caption is supplied by the flow.
+- Voiceover segments start at their corresponding caption timestamps. Leave a short `h.sleep(...)`
+  after the final caption so the spoken ending is included before recording stops.
+- When voiceover is enabled, confirm the recorder logs `AUDIO_STREAM=` for the final output.
+  You can independently probe an output with `ffmpeg -v error -i <video> -map 0:a:0 -f null -`.
 
 ## Flow Helpers
 
@@ -150,7 +175,7 @@ The flow file exports `default async function runFlow(page, h)` and uses:
 | Helper | Purpose |
 |--------|---------|
 | `h.goto(path)` | navigate (relative resolves against `--base`), waits networkidle |
-| `h.caption(text)` | set the on-screen subtitle bar (the narration script) |
+| `h.caption(text)` | set the on-screen subtitle bar (the narration script); with `--voiceover`, the same text is spoken |
 | `h.glideClick(locator)` | glide the visible cursor to the element, then click |
 | `h.glideTo(locator)` | glide the cursor to the element without clicking |
 | `h.highlight(locator)` | draw the pulsing spotlight box around an element's bounding rect |
@@ -167,8 +192,8 @@ See `assets/example-flow.mjs` for a complete login walkthrough template.
 ```
 docs/client-demo/
 └── 20250620_143022_login/
-    ├── login-demo.mp4        # the whole walkthrough (client-presentable)
-    ├── login-demo.webm       # native recording (fallback if no ffmpeg)
+    ├── login-demo.mp4        # the whole walkthrough (audio included with --voiceover)
+    ├── login-demo.webm       # native or voiceover-muxed recording
     ├── flow.mjs              # the generated flow + caption script (optional to keep)
     └── screenshots/
         ├── 001_open.png
@@ -190,7 +215,11 @@ A client demo is complete only when:
 - a screenshot exists for each key milestone under `screenshots/`, including explained
   elements and the result on every page involved
 - one whole video exists (`.mp4`, or `.webm` if ffmpeg is unavailable)
+- when voiceover was requested, the final `.webm` or `.mp4` has a verified audio stream and
+  the voiceover was generated from the flow's non-empty captions
 - artifacts are saved under `docs/client-demo/<timestamp>_<feature>/`
+- **if `$JHECKBOT_MEDIA_DIR` is set, the final `.mp4` was copied to
+  `$JHECKBOT_MEDIA_DIR/capture.mp4`** so it renders inline in the chat reply
 - the recorder exited cleanly (no `FLOW_ERROR`) and any mutated data was restored
 
 ## Blocked Conditions
@@ -200,6 +229,7 @@ Report `BLOCKED` (and do not fabricate a video) when:
 - the feature/route cannot be located in the repo
 - required auth or demo credentials are unavailable
 - the flow hits a real product bug (hand off to `comprehensive-qa-testing` for fixing)
+- voiceover was requested but no supported local TTS engine or `ffmpeg-static` is available
 - no browser tooling can be installed (no Playwright, no network)
 
 State the exact blocker and the minimum next action needed.

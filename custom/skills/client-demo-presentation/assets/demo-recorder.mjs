@@ -35,6 +35,7 @@
  *   --width <px>     Viewport width                     (env DEMO_WIDTH;  default 1920)
  *   --height <px>    Viewport height                    (env DEMO_HEIGHT; default 1080)
  *   --headed         Run with a visible browser (needs a display; default headless)
+ *   --voiceover      Generate TTS voiceover from h.caption() calls
  *
  * THE FLOW FILE (see example-flow.mjs next to this file):
  *   export default async function runFlow(page, h) { ... }
@@ -52,6 +53,13 @@ import { execFileSync } from 'child_process';
 import { existsSync, mkdirSync, rmSync, readdirSync, copyFileSync } from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
+import {
+  generateVoiceoverSegments,
+  isVoiceoverEnabled,
+  muxVoiceover,
+  resolveTtsEngine,
+  verifyAudioStream,
+} from './voiceover.mjs';
 
 // Resolve runtime deps (playwright, ffmpeg-static) from where they were INSTALLED,
 // not from this script's folder — so the recorder can live in a skill dir while deps
@@ -93,7 +101,23 @@ const CONFIG = {
     height: Number(args.height || process.env.DEMO_HEIGHT || 1080),
   },
   HEADLESS: !(args.headed || process.env.DEMO_HEADED),
+  VOICEOVER: isVoiceoverEnabled(args.voiceover ?? process.env.DEMO_VOICEOVER),
 };
+
+let voiceoverEngine = null;
+let ffmpegPath = null;
+if (CONFIG.VOICEOVER) {
+  try {
+    voiceoverEngine = resolveTtsEngine();
+    ffmpegPath = requireFrom('ffmpeg-static');
+    if (!ffmpegPath || !existsSync(ffmpegPath)) {
+      throw new Error('ffmpeg-static did not provide an available executable path.');
+    }
+  } catch (e) {
+    console.error(`[recorder] Voiceover unavailable: ${e.message}`);
+    process.exit(1);
+  }
+}
 
 // ── Injected per-document overlay: animated cursor + caption (subtitle) bar ───
 // Runs before page scripts on every navigation, so it survives reloads/route changes.
@@ -205,14 +229,21 @@ async function loadFlow(flowPath) {
   const page = await context.newPage();
 
   const toUrl = (p) => (/^https?:\/\//.test(p) ? p : CONFIG.BASE.replace(/\/$/, '') + (p.startsWith('/') ? p : `/${p}`));
+  const recordingStartedAt = process.hrtime.bigint();
+  const captionTimeline = [];
+  const elapsedMs = () => Number(process.hrtime.bigint() - recordingStartedAt) / 1e6;
   let shotN = 0;
   const h = {
     page, BASE: CONFIG.BASE, viewport: CONFIG.VIEWPORT, sleep,
     goto: (p = '/', opts = {}) => page.goto(toUrl(p), { waitUntil: 'networkidle', ...opts }),
-    caption: (t) => page.evaluate((x) => {
-      const cap = document.getElementById('__demoCaption');
-      if (cap) { cap.textContent = x; cap.style.opacity = x ? '1' : '0'; }
-    }, t).catch(() => {}),
+    caption: async (t) => {
+      const text = String(t ?? '');
+      captionTimeline.push({ text, at: elapsedMs() });
+      await page.evaluate((x) => {
+        const cap = document.getElementById('__demoCaption');
+        if (cap) { cap.textContent = x; cap.style.opacity = x ? '1' : '0'; }
+      }, text).catch(() => {});
+    },
     glideTo: async (loc, { steps = 28 } = {}) => {
       await loc.scrollIntoViewIfNeeded().catch(() => {});
       const b = await loc.boundingBox();
@@ -272,23 +303,68 @@ async function loadFlow(flowPath) {
   await browser.close();
 
   const webm = video ? await video.path() : null;
-  let out = webm;
+  let webmOutput = null;
+  let out = null;
+  let voiceoverError = null;
   if (webm) {
     const target = path.join(CONFIG.OUT_DIR, `${CONFIG.NAME}.webm`);
     rmSync(target, { force: true });
-    copyFileSync(webm, target); // stable, predictable name
-    out = target;
-    try {
-      const ffmpeg = requireFrom('ffmpeg-static');
-      const mp4 = path.join(CONFIG.OUT_DIR, `${CONFIG.NAME}.mp4`);
-      execFileSync(ffmpeg, ['-y', '-i', target, '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
-        '-movflags', '+faststart', '-r', '24', mp4], { stdio: 'ignore' });
-      if (existsSync(mp4)) { out = mp4; console.log('MP4=' + mp4); }
-    } catch { console.warn('[recorder] ffmpeg-static not installed; .webm is the deliverable'); }
+
+    if (CONFIG.VOICEOVER) {
+      const voiceoverDir = path.join(CONFIG.OUT_DIR, '.voiceover');
+      try {
+        const audioFiles = generateVoiceoverSegments({
+          captions: captionTimeline,
+          engine: voiceoverEngine,
+          outputDir: voiceoverDir,
+        });
+        muxVoiceover({
+          ffmpeg: ffmpegPath,
+          inputVideo: webm,
+          audioFiles,
+          captions: captionTimeline,
+          output: target,
+          format: 'webm',
+        });
+        verifyAudioStream({ ffmpeg: ffmpegPath, mediaPath: target });
+        webmOutput = target;
+        out = target;
+        console.log('AUDIO_STREAM=' + target);
+
+        const mp4 = path.join(CONFIG.OUT_DIR, `${CONFIG.NAME}.mp4`);
+        try {
+          execFileSync(ffmpegPath, ['-y', '-i', target, '-map', '0:v:0', '-map', '0:a:0',
+            '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-r', '24',
+            '-c:a', 'aac', '-b:a', '128k', mp4], { stdio: 'ignore' });
+          verifyAudioStream({ ffmpeg: ffmpegPath, mediaPath: mp4 });
+          if (existsSync(mp4)) { out = mp4; console.log('MP4=' + mp4); console.log('AUDIO_STREAM=' + mp4); }
+        } catch (e) {
+          rmSync(mp4, { force: true });
+          console.warn(`[recorder] MP4 voiceover conversion failed; audio WebM is the deliverable: ${e.message}`);
+        }
+      } catch (e) {
+        voiceoverError = e;
+        rmSync(target, { force: true });
+        console.error('VOICEOVER_ERROR', e.message);
+      } finally {
+        rmSync(voiceoverDir, { recursive: true, force: true });
+      }
+    } else {
+      copyFileSync(webm, target); // stable, predictable name
+      webmOutput = target;
+      out = target;
+      try {
+        const ffmpeg = requireFrom('ffmpeg-static');
+        const mp4 = path.join(CONFIG.OUT_DIR, `${CONFIG.NAME}.mp4`);
+        execFileSync(ffmpeg, ['-y', '-i', target, '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+          '-movflags', '+faststart', '-r', '24', mp4], { stdio: 'ignore' });
+        if (existsSync(mp4)) { out = mp4; console.log('MP4=' + mp4); }
+      } catch { console.warn('[recorder] ffmpeg-static not installed; .webm is the deliverable'); }
+    }
   }
-  console.log('WEBM=' + (webm ? path.join(CONFIG.OUT_DIR, `${CONFIG.NAME}.webm`) : 'NONE'));
+  console.log('WEBM=' + (webmOutput || 'NONE'));
   console.log('SHOTS=' + shotN);
-  console.log('OUTPUT=' + out);
+  console.log('OUTPUT=' + (out || 'NONE'));
   console.log('FILES=' + readdirSync(CONFIG.OUT_DIR).join(','));
-  if (err) process.exit(1);
+  if (err || voiceoverError) process.exit(1);
 })().catch((e) => { console.error('RECORDER_ERROR', e); process.exit(1); });

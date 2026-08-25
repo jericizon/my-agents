@@ -4,12 +4,12 @@
  *
  * Export a default async function `runFlow(page, h)`. `h` gives you helpers that make
  * the recording presentation-quality (visible cursor glide + subtitle captions +
- * milestone screenshots):
+ * milestone screenshots; pass --voiceover to read each caption aloud):
  *
  *   h.BASE                      base URL passed on the CLI
  *   h.viewport                  { width, height }
  *   h.goto(pathOrUrl)           navigate (relative paths resolve against BASE), waits networkidle
- *   h.caption(text)             update the on-screen subtitle/narration bar (pass '' to hide)
+ *   h.caption(text)             update the on-screen subtitle/narration bar (pass '' to hide); this text is spoken in voiceover mode
  *   h.glideClick(locator, opts) glide the cursor to the element, then click  (opts: {steps, settle})
  *   h.glideTo(locator, opts)    glide the cursor to the element without clicking
  *   h.highlight(locator, opts)  draw the pulsing spotlight box around an element (opts: {padding})
@@ -26,7 +26,8 @@
  * page.locator('[id="x"]'), etc. (CSS ids starting with a digit are invalid — use [id="123_foo"].)
  *
  * GUIDELINES
- * - Narrate EVERY step with h.caption so a non-technical client can follow along.
+ * - Narrate EVERY step with h.caption so a non-technical client can follow along. In voiceover
+ *   mode, every non-empty caption is also read aloud, so keep captions concise and complete.
  * - Explain the WHOLE page: use h.explain(locator, text) on every meaningful control, even
  *   ones this flow never interacts with (e.g. a "remember me" checkbox, a "forgot password"
  *   link) — the viewer should come away understanding the whole page, not just the 3 fields
