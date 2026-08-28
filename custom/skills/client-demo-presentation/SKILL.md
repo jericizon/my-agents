@@ -63,10 +63,15 @@ Do NOT use this skill when:
   recorder reads every non-empty `h.caption(...)` call into the final video; this is caption
   voiceover only, not app/browser audio. Do not invent background music or claim audio exists
   without verifying the output stream.
+- For a clear, free, natural-sounding voice, use the local Piper neural engine rather than the
+  platform default synthesizer. Run `assets/setup-voiceover.sh` once, then set
+  `DEMO_TTS_ENGINE=piper`, `DEMO_TTS_BIN`, and `DEMO_TTS_MODEL` before recording. This path has
+  no paid API or recurring usage cost and keeps caption text on the machine after setup.
 - If voiceover is requested, require a local TTS engine and `ffmpeg-static`; report `BLOCKED`
-  before recording if either prerequisite is unavailable. The recorder supports `say` on
-  macOS, `espeak-ng`/`espeak` on Linux, and PowerShell/SAPI on Windows. Set `DEMO_TTS_BIN`
-  only when it points to a compatible local engine.
+  before recording if either prerequisite is unavailable. The recorder supports Piper, `say` on
+  macOS, `espeak-ng`/`espeak` on Linux, and PowerShell/SAPI on Windows. Set `DEMO_TTS_BIN` only
+  when it points to the selected compatible local engine. Do not silently replace an explicitly
+  selected Piper engine with a lower-quality fallback.
 - If the demo mutates data, restore it at the end so the environment is left unchanged.
 - **Render inline in chat.** After recording, if `$JHECKBOT_MEDIA_DIR` is set, copy the
   final `.mp4` to `$JHECKBOT_MEDIA_DIR/capture.mp4` so the video renders inline in the chat
@@ -131,6 +136,20 @@ the cache is already valid:
 bash /abs/path/to/skills/client-demo-presentation/assets/setup-tooling.sh
 ```
 
+For the recommended free neural voiceover, install the pinned local Piper runtime and the
+high-quality `en_US-ljspeech-high` voice model:
+
+```bash
+bash /abs/path/to/skills/client-demo-presentation/assets/setup-voiceover.sh
+```
+
+The setup script prints `DEMO_TTS_ENGINE`, `DEMO_TTS_BIN`, and `DEMO_TTS_MODEL` exports. Apply
+those exports in the shell that runs the recorder, and add them to your shell profile if you
+want the Piper voice selected for future sessions. The first run needs network access for PyPI
+and the voice download; recording is local after setup. The script installs `piper-tts==1.7.0`
+into `~/.cache/client-demo-presentation/piper` and downloads the voice into the same cache; it
+does not modify the project package manifest or any `.env` file.
+
 Then record, pointing at the running app and the flow. Set `DEMO_MODULES` so the recorder
 resolves Playwright from the cache, and `PLAYWRIGHT_BROWSERS_PATH` so it finds the cached
 Chromium binaries:
@@ -156,11 +175,20 @@ Notes:
 - Playwright records `.webm` natively (no system ffmpeg). `ffmpeg-static` creates the `.mp4`
   and, in voiceover mode, muxes the generated audio into both video formats. Without
   voiceover, if it is missing, the video-only `.webm` is the deliverable.
-- Voiceover requires an installed local TTS engine: `say` on macOS, `espeak-ng` or `espeak`
-  on Linux, or Windows PowerShell/SAPI. The setup script does not install OS packages.
+- Piper is the recommended free neural engine: it runs locally, requires no API key or paid
+  service, and reads the caption text from stdin into a WAV file. The setup script does not
+  install OS packages.
+- The default `en_US-ljspeech-high` voice is a single-speaker, 22,050 Hz US English voice. Its
+  model card identifies the LJ Speech dataset as public domain. The pinned `piper-tts==1.7.0`
+  runtime is GPL-3.0-or-later, and Piper voices have individual model-card terms. “Free” means
+  no API or usage charge here, not unrestricted licensing; review both runtime and voice terms
+  before bundling them with a product or distributing them for a commercial use case.
+  Sources: https://huggingface.co/rhasspy/piper-voices/blob/main/en/en_US/ljspeech/high/MODEL_CARD
+  and https://pypi.org/project/piper-tts/
 - Flags also settable via env: `DEMO_BASE / DEMO_FLOW / DEMO_OUT / DEMO_NAME / DEMO_WIDTH /
-  DEMO_HEIGHT / DEMO_HEADED / DEMO_VOICEOVER / DEMO_TTS_BIN`. Set `DEMO_MODULES` if running
-  the recorder from a dir other than where `node_modules` was installed.
+  DEMO_HEIGHT / DEMO_HEADED / DEMO_VOICEOVER / DEMO_TTS_ENGINE / DEMO_TTS_BIN /
+  DEMO_TTS_MODEL`. Set `DEMO_MODULES` if running the recorder from a dir other than where
+  `node_modules` was installed.
 - Run with no `--flow` to record a placeholder open-only clip that verifies the setup. It
   includes voiceover only when a caption is supplied by the flow.
 - Voiceover segments start at their corresponding caption timestamps. Leave a short `h.sleep(...)`
@@ -229,7 +257,7 @@ Report `BLOCKED` (and do not fabricate a video) when:
 - the feature/route cannot be located in the repo
 - required auth or demo credentials are unavailable
 - the flow hits a real product bug (hand off to `comprehensive-qa-testing` for fixing)
-- voiceover was requested but no supported local TTS engine or `ffmpeg-static` is available
+- voiceover was requested but the selected local TTS engine, Piper model/config, or `ffmpeg-static` is unavailable
 - no browser tooling can be installed (no Playwright, no network)
 
 State the exact blocker and the minimum next action needed.

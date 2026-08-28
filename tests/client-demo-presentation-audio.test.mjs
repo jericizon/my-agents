@@ -50,6 +50,115 @@ test('resolves the preferred Linux TTS executable from PATH', () => {
   }
 });
 
+test('resolves Piper with a model and sidecar config', () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'client-demo-piper-'));
+  try {
+    const executable = path.join(directory, 'piper');
+    const model = path.join(directory, 'en_US-ljspeech-high.onnx');
+    writeFileSync(executable, 'test');
+    writeFileSync(model, 'model');
+    writeFileSync(`${model}.json`, '{}');
+    chmodSync(executable, 0o755);
+    assert.deepEqual(resolveTtsEngine({
+      platform: 'linux',
+      env: { PATH: directory, DEMO_TTS_ENGINE: 'piper', DEMO_TTS_MODEL: model },
+    }), {
+      kind: 'piper',
+      command: executable,
+      model,
+    });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('requires a Piper model and sidecar config when Piper is selected', () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'client-demo-piper-missing-'));
+  try {
+    const executable = path.join(directory, 'piper');
+    writeFileSync(executable, 'test');
+    chmodSync(executable, 0o755);
+    assert.throws(
+      () => resolveTtsEngine({
+        platform: 'linux',
+        env: { PATH: directory, DEMO_TTS_ENGINE: 'piper', DEMO_TTS_MODEL: path.join(directory, 'missing.onnx') },
+      }),
+      /Piper voice model not found/,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('rejects an invalid Piper model config JSON file', () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'client-demo-piper-config-'));
+  try {
+    const executable = path.join(directory, 'piper');
+    const model = path.join(directory, 'voice.onnx');
+    writeFileSync(executable, 'test');
+    writeFileSync(model, 'model');
+    writeFileSync(`${model}.json`, '{invalid');
+    chmodSync(executable, 0o755);
+    assert.throws(
+      () => resolveTtsEngine({
+        platform: 'linux',
+        env: { PATH: directory, DEMO_TTS_ENGINE: 'piper', DEMO_TTS_MODEL: model },
+      }),
+      /Piper voice model config is not valid JSON/,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('rejects a TTS engine that does not match the host platform', () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'client-demo-engine-mismatch-'));
+  try {
+    const executable = path.join(directory, 'espeak-ng');
+    writeFileSync(executable, 'test');
+    chmodSync(executable, 0o755);
+    assert.throws(
+      () => resolveTtsEngine({
+        platform: 'linux',
+        env: { PATH: directory, DEMO_TTS_ENGINE: 'say' },
+      }),
+      /DEMO_TTS_ENGINE 'say' is not supported on linux/,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('generates Piper audio by sending caption text to stdin', () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'client-demo-piper-audio-'));
+  try {
+    let captured;
+    const outputPath = path.join(directory, 'voice.wav');
+    const spawnSync = (command, args, options) => {
+      captured = { command, args, options };
+      writeFileSync(outputPath, 'wav');
+      return { status: 0, error: null, stdout: '', stderr: '' };
+    };
+    assert.equal(createTtsAudio({
+      kind: 'piper',
+      command: 'piper',
+      model: '/voices/en_US-ljspeech-high.onnx',
+    }, 'Clear narration', outputPath, { spawnSync }), outputPath);
+    assert.deepEqual(captured, {
+      command: 'piper',
+      args: ['--model', '/voices/en_US-ljspeech-high.onnx', '--output_file', outputPath],
+      options: {
+        input: 'Clear narration\n',
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+      },
+    });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('generates caption audio segments through the selected TTS engine', () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), 'client-demo-voiceover-'));
   try {

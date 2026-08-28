@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync as defaultSpawnSync } from 'child_process';
-import { existsSync, mkdirSync, statSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs';
 import path from 'path';
 
 const VOICEOVER_TRUE_VALUES = new Set(['1', 'true', 'yes', 'on']);
@@ -49,10 +49,52 @@ const TTS_ENGINE_CONFIG = {
   sunos: { kind: 'espeak', candidates: ['espeak-ng', 'espeak'], label: 'SunOS espeak-ng or espeak' },
 };
 
+function isRegularFile(file) {
+  try {
+    return statSync(file).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function resolvePiperEngine({ platform, env }) {
+  const candidates = env.DEMO_TTS_BIN ? [env.DEMO_TTS_BIN] : ['piper'];
+  const command = candidates.map((candidate) => resolveExecutable(candidate, { platform, env })).find(Boolean);
+  if (!command) {
+    throw new Error('Piper voiceover requested but the piper executable was not found. Run setup-voiceover.sh or set DEMO_TTS_BIN.');
+  }
+
+  const model = String(env.DEMO_TTS_MODEL || '').trim();
+  if (!model) {
+    throw new Error('Piper voiceover requested but DEMO_TTS_MODEL is not set. Point it to a downloaded .onnx voice model.');
+  }
+  const modelPath = path.resolve(model);
+  if (!isRegularFile(modelPath)) {
+    throw new Error(`Piper voice model not found: ${modelPath}`);
+  }
+  const configPath = `${modelPath}.json`;
+  if (!isRegularFile(configPath)) {
+    throw new Error(`Piper voice model config not found: ${configPath}`);
+  }
+  try {
+    JSON.parse(readFileSync(configPath, 'utf8'));
+  } catch {
+    throw new Error(`Piper voice model config is not valid JSON: ${configPath}`);
+  }
+
+  return { kind: 'piper', command, model: modelPath };
+}
+
 export function resolveTtsEngine({ platform = process.platform, env = process.env } = {}) {
+  const requestedKind = String(env.DEMO_TTS_ENGINE || '').trim().toLowerCase();
+  if (requestedKind === 'piper') return resolvePiperEngine({ platform, env });
+
   const config = TTS_ENGINE_CONFIG[platform];
   if (!config) {
     throw new Error(`Voiceover is not supported on platform ${platform}; set up a supported local TTS engine first.`);
+  }
+  if (requestedKind && requestedKind !== config.kind) {
+    throw new Error(`DEMO_TTS_ENGINE '${requestedKind}' is not supported on ${platform}; use '${config.kind}' or 'piper'.`);
   }
 
   const candidates = env.DEMO_TTS_BIN ? [env.DEMO_TTS_BIN] : config.candidates;
@@ -80,7 +122,17 @@ export function createTtsAudio(engine, text, outputPath, { spawnSync = defaultSp
   mkdirSync(path.dirname(outputPath), { recursive: true });
 
   let result;
-  if (engine.kind === 'espeak') {
+  if (engine.kind === 'piper') {
+    result = spawnSync(engine.command, ['--model', engine.model, '--output_file', outputPath], {
+      input: `${spokenText}\n`,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    if (result.error || result.status !== 0) {
+      throw new Error(`TTS failed for caption: ${result.error?.message || String(result.stderr || '').trim() || `exit code ${result.status}`}`);
+    }
+  } else if (engine.kind === 'espeak') {
     result = spawnSync(engine.command, ['--stdout', spokenText], {
       encoding: null,
       stdio: ['ignore', 'pipe', 'pipe'],
