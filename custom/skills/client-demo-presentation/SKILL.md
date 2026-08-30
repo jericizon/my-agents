@@ -1,6 +1,6 @@
 ---
 name: client-demo-presentation
-description: Use when the user wants a client-presentable or stakeholder demo walkthrough video of a feature in a running app — a real-browser screen recording with a visible moving mouse cursor, on-screen subtitle/caption instructions, or an optional spoken voiceover generated from the captions (e.g. "present how to log in", "record a demo of checkout", "make a client demo of X").
+description: Use when the user wants a client-presentable or stakeholder demo walkthrough video of a feature in a running app — a real-browser screen recording with a visible moving mouse cursor, on-screen subtitle/caption instructions, optional spoken voiceover, or consistent/natural-sounding demo audio (e.g. "present how to log in", "record a demo of checkout", "make a client demo of X").
 ---
 
 # Client Demo Presentation
@@ -63,10 +63,26 @@ Do NOT use this skill when:
   recorder reads every non-empty `h.caption(...)` call into the final video; this is caption
   voiceover only, not app/browser audio. Do not invent background music or claim audio exists
   without verifying the output stream.
-- For a clear, free, natural-sounding voice, use the local Piper neural engine rather than the
-  platform default synthesizer. Run `assets/setup-voiceover.sh` once, then set
-  `DEMO_TTS_ENGINE=piper`, `DEMO_TTS_BIN`, and `DEMO_TTS_MODEL` before recording. This path has
-  no paid API or recurring usage cost and keeps caption text on the machine after setup.
+- The voiceover mux applies single-pass EBU R128 loudness normalization to the complete assembled
+  track: `-16 LUFS` integrated loudness, `-1.5 dBTP` maximum true peak, and `7 LU` loudness range.
+  Override these numeric targets with `DEMO_AUDIO_TARGET_LUFS`, `DEMO_AUDIO_MAX_TRUE_PEAK`, and
+  `DEMO_AUDIO_TARGET_LRA` only when the delivery platform requires different mastering.
+- For a clear, free, more natural-sounding synthetic voice, use the local Piper engine with the
+  `en_US-lessac-high` model rather than the platform default synthesizer. Run
+  `assets/setup-voiceover.sh` once, then apply its printed exports before recording. Its profile
+  uses a normal speaking pace, mild variation, short sentence pauses, and final-track loudness
+  normalization. Tune it with `DEMO_TTS_LENGTH_SCALE`, `DEMO_TTS_NOISE_SCALE`,
+  `DEMO_TTS_NOISE_W_SCALE`, `DEMO_TTS_SENTENCE_SILENCE`, and `DEMO_TTS_VOLUME`.
+- Piper is neural TTS, so it remains synthetic even when it sounds natural. Never describe it as
+  a human or non-AI recording. A genuinely human voice requires a supplied human narration track;
+  do not fabricate one or claim that audio filters can convert TTS into a human recording.
+- Treat existing recordings as read-only by default. Do not assume a directory, select files by a
+  wildcard, or overwrite an artifact. If a user explicitly requests post-processing, confirm the
+  exact input and write a separately named output after a metadata/loudness check.
+- For this recorder's generated voiceover, use the final `loudnorm` stage as the canonical level
+  correction. Do not add time-based volume boosts or `dynaudnorm` by guesswork: they can create
+  pumping and less-natural speech. Choose another filter only when measured source behavior and
+  a separate review justify it.
 - If voiceover is requested, require a local TTS engine and `ffmpeg-static`; report `BLOCKED`
   before recording if either prerequisite is unavailable. The recorder supports Piper, `say` on
   macOS, `espeak-ng`/`espeak` on Linux, and PowerShell/SAPI on Windows. Set `DEMO_TTS_BIN` only
@@ -137,18 +153,19 @@ bash /abs/path/to/skills/client-demo-presentation/assets/setup-tooling.sh
 ```
 
 For the recommended free neural voiceover, install the pinned local Piper runtime and the
-high-quality `en_US-ljspeech-high` voice model:
+high-quality `en_US-lessac-high` voice model:
 
 ```bash
 bash /abs/path/to/skills/client-demo-presentation/assets/setup-voiceover.sh
 ```
 
-The setup script prints `DEMO_TTS_ENGINE`, `DEMO_TTS_BIN`, and `DEMO_TTS_MODEL` exports. Apply
-those exports in the shell that runs the recorder, and add them to your shell profile if you
-want the Piper voice selected for future sessions. The first run needs network access for PyPI
-and the voice download; recording is local after setup. The script installs `piper-tts==1.7.0`
-into `~/.cache/client-demo-presentation/piper` and downloads the voice into the same cache; it
-does not modify the project package manifest or any `.env` file.
+The setup script prints exports for `DEMO_TTS_ENGINE`, `DEMO_TTS_BIN`, `DEMO_TTS_MODEL`, the
+natural presentation profile, and the loudness targets. Apply those exports in the shell that
+runs the recorder, and add them to your shell profile if you want the Piper voice selected for
+future sessions. The first run needs network access for PyPI and the voice download; recording is
+local after setup. The script installs `piper-tts==1.7.0` into `~/.cache/client-demo-presentation/piper`
+and downloads the voice into the same cache; it does not modify the project package manifest or
+any `.env` file.
 
 Then record, pointing at the running app and the flow. Set `DEMO_MODULES` so the recorder
 resolves Playwright from the cache, and `PLAYWRIGHT_BROWSERS_PATH` so it finds the cached
@@ -175,26 +192,34 @@ Notes:
 - Playwright records `.webm` natively (no system ffmpeg). `ffmpeg-static` creates the `.mp4`
   and, in voiceover mode, muxes the generated audio into both video formats. Without
   voiceover, if it is missing, the video-only `.webm` is the deliverable.
-- Piper is the recommended free neural engine: it runs locally, requires no API key or paid
-  service, and reads the caption text from stdin into a WAV file. The setup script does not
-  install OS packages.
-- The default `en_US-ljspeech-high` voice is a single-speaker, 22,050 Hz US English voice. Its
-  model card identifies the LJ Speech dataset as public domain. The pinned `piper-tts==1.7.0`
-  runtime is GPL-3.0-or-later, and Piper voices have individual model-card terms. “Free” means
-  no API or usage charge here, not unrestricted licensing; review both runtime and voice terms
-  before bundling them with a product or distributing them for a commercial use case.
-  Sources: https://huggingface.co/rhasspy/piper-voices/blob/main/en/en_US/ljspeech/high/MODEL_CARD
+- Piper is the recommended free local neural engine: it requires no API key or paid service and
+  reads caption text from stdin into a WAV file. The setup script does not install OS packages.
+- The default `en_US-lessac-high` voice is a single-speaker, 22,050 Hz US English voice. Review
+  its model-card terms before distribution. The pinned `piper-tts==1.7.0` runtime is
+  GPL-3.0-or-later. “Free” means no API or usage charge here, not unrestricted licensing.
+  Sources: https://huggingface.co/rhasspy/piper-voices/blob/main/en/en_US/lessac/high/MODEL_CARD
   and https://pypi.org/project/piper-tts/
+- The final voiceover track is resampled to 48 kHz and uses FFmpeg's dynamic `loudnorm` filter,
+  targeting `-16 LUFS`, `-1.5 dBTP`, and `7 LU` by default. See
+  https://ffmpeg.org/ffmpeg-filters.html#loudnorm.
 - Flags also settable via env: `DEMO_BASE / DEMO_FLOW / DEMO_OUT / DEMO_NAME / DEMO_WIDTH /
   DEMO_HEIGHT / DEMO_HEADED / DEMO_VOICEOVER / DEMO_TTS_ENGINE / DEMO_TTS_BIN /
-  DEMO_TTS_MODEL`. Set `DEMO_MODULES` if running the recorder from a dir other than where
-  `node_modules` was installed.
+  DEMO_TTS_MODEL / DEMO_AUDIO_TARGET_LUFS / DEMO_AUDIO_MAX_TRUE_PEAK / DEMO_AUDIO_TARGET_LRA /
+  DEMO_TTS_LENGTH_SCALE / DEMO_TTS_NOISE_SCALE / DEMO_TTS_NOISE_W_SCALE /
+  DEMO_TTS_SENTENCE_SILENCE / DEMO_TTS_VOLUME`. `DEMO_TTS_VOICE` is setup-only: it chooses the
+  model downloaded by `setup-voiceover.sh`, which then prints the required `DEMO_TTS_MODEL`.
+  Setup cache overrides are `CLIENT_DEMO_CACHE_DIR`, `CLIENT_DEMO_PIPER_DIR`,
+  `DEMO_TTS_DATA_DIR`, and `PYTHON_BIN`. Set `DEMO_MODULES` if running the recorder from a dir
+  other than where `node_modules` was installed.
 - Run with no `--flow` to record a placeholder open-only clip that verifies the setup. It
   includes voiceover only when a caption is supplied by the flow.
-- Voiceover segments start at their corresponding caption timestamps. Leave a short `h.sleep(...)`
-  after the final caption so the spoken ending is included before recording stops.
-- When voiceover is enabled, confirm the recorder logs `AUDIO_STREAM=` for the final output.
-  You can independently probe an output with `ffmpeg -v error -i <video> -map 0:a:0 -f null -`.
+- Voiceover segments start at their corresponding caption timestamps. Leave enough `h.sleep(...)`
+  after the final caption for the generated speech to finish before recording stops; split long
+  final captions or increase the pause instead of trimming the audio.
+- When voiceover is enabled, confirm the recorder logs `AUDIO_STREAM=` for the final output and
+  probe the file with `ffmpeg -v error -i <video> -map 0:a:0 -f null -`. For a meaningful loudness
+  check, run `-af loudnorm=I=-16:TP=-1.5:LRA=7:linear=false:print_format=json` on the final file
+  and listen through the full track.
 
 ## Flow Helpers
 
@@ -243,8 +268,11 @@ A client demo is complete only when:
 - a screenshot exists for each key milestone under `screenshots/`, including explained
   elements and the result on every page involved
 - one whole video exists (`.mp4`, or `.webm` if ffmpeg is unavailable)
-- when voiceover was requested, the final `.webm` or `.mp4` has a verified audio stream and
-  the voiceover was generated from the flow's non-empty captions
+- when voiceover was requested, the final `.webm` or `.mp4` has a verified audio stream, the
+  complete track was loudness-normalized, and the voiceover was generated from the flow's
+  non-empty captions
+- synthetic Piper narration is described honestly as neural TTS; a human/non-AI claim is made
+  only when a supplied human recording is used
 - artifacts are saved under `docs/client-demo/<timestamp>_<feature>/`
 - **if `$JHECKBOT_MEDIA_DIR` is set, the final `.mp4` was copied to
   `$JHECKBOT_MEDIA_DIR/capture.mp4`** so it renders inline in the chat reply

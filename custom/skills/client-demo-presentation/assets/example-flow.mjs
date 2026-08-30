@@ -108,5 +108,5 @@ export default async function runFlow(page, h) {
   //     'This is the title we just entered in the editor — now live for visitors');
   //   await h.shot('published-page-live');
 
-  await h.sleep(1000);
+  await h.sleep(2500);
 }

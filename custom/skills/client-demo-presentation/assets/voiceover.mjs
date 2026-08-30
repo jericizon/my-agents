@@ -3,10 +3,87 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs
 import path from 'path';
 
 const VOICEOVER_TRUE_VALUES = new Set(['1', 'true', 'yes', 'on']);
+const AUDIO_NORMALIZATION_DEFAULTS = Object.freeze({
+  integratedLoudness: -16,
+  maxTruePeak: -1.5,
+  loudnessRange: 7,
+});
+const PIPER_VOICE_DEFAULTS = Object.freeze({
+  lengthScale: 1,
+  noiseScale: 0.667,
+  noiseWScale: 0.8,
+  sentenceSilence: 0.12,
+  volume: 1,
+});
 
 export function isVoiceoverEnabled(value) {
   if (typeof value === 'boolean') return value;
   return VOICEOVER_TRUE_VALUES.has(String(value || '').trim().toLowerCase());
+}
+
+function readConfiguredNumber(env, name, defaultValue, {
+  min = 0,
+  max = Number.POSITIVE_INFINITY,
+  minExclusive = false,
+  rangeDescription = `between ${min} and ${max}`,
+} = {}) {
+  const raw = String(env[name] ?? '').trim();
+  if (!raw) return defaultValue;
+  const value = Number(raw);
+  const aboveMinimum = minExclusive ? value > min : value >= min;
+  if (!Number.isFinite(value) || !aboveMinimum || value > max) {
+    throw new Error(`${name} must be a number ${rangeDescription}.`);
+  }
+  return value;
+}
+
+function resolveAudioNormalization(env) {
+  return {
+    integratedLoudness: readConfiguredNumber(env, 'DEMO_AUDIO_TARGET_LUFS', AUDIO_NORMALIZATION_DEFAULTS.integratedLoudness, {
+      min: -70,
+      max: -5,
+      rangeDescription: 'between -70 and -5',
+    }),
+    maxTruePeak: readConfiguredNumber(env, 'DEMO_AUDIO_MAX_TRUE_PEAK', AUDIO_NORMALIZATION_DEFAULTS.maxTruePeak, {
+      min: -9,
+      max: 0,
+      rangeDescription: 'between -9 and 0',
+    }),
+    loudnessRange: readConfiguredNumber(env, 'DEMO_AUDIO_TARGET_LRA', AUDIO_NORMALIZATION_DEFAULTS.loudnessRange, {
+      min: 1,
+      max: 50,
+      rangeDescription: 'between 1 and 50',
+    }),
+  };
+}
+
+function resolvePiperVoiceOptions(env) {
+  return {
+    lengthScale: readConfiguredNumber(env, 'DEMO_TTS_LENGTH_SCALE', PIPER_VOICE_DEFAULTS.lengthScale, {
+      min: 0,
+      max: 2,
+      minExclusive: true,
+      rangeDescription: 'greater than 0 and at most 2',
+    }),
+    noiseScale: readConfiguredNumber(env, 'DEMO_TTS_NOISE_SCALE', PIPER_VOICE_DEFAULTS.noiseScale, {
+      max: 2,
+      rangeDescription: 'between 0 and 2',
+    }),
+    noiseWScale: readConfiguredNumber(env, 'DEMO_TTS_NOISE_W_SCALE', PIPER_VOICE_DEFAULTS.noiseWScale, {
+      max: 2,
+      rangeDescription: 'between 0 and 2',
+    }),
+    sentenceSilence: readConfiguredNumber(env, 'DEMO_TTS_SENTENCE_SILENCE', PIPER_VOICE_DEFAULTS.sentenceSilence, {
+      max: 2,
+      rangeDescription: 'between 0 and 2',
+    }),
+    volume: readConfiguredNumber(env, 'DEMO_TTS_VOLUME', PIPER_VOICE_DEFAULTS.volume, {
+      min: 0,
+      max: 2,
+      minExclusive: true,
+      rangeDescription: 'greater than 0 and at most 2',
+    }),
+  };
 }
 
 function isExecutable(file, platform) {
@@ -123,7 +200,16 @@ export function createTtsAudio(engine, text, outputPath, { spawnSync = defaultSp
 
   let result;
   if (engine.kind === 'piper') {
-    result = spawnSync(engine.command, ['--model', engine.model, '--output_file', outputPath], {
+    const options = resolvePiperVoiceOptions(env);
+    result = spawnSync(engine.command, [
+      '--model', engine.model,
+      '--output_file', outputPath,
+      '--length_scale', String(options.lengthScale),
+      '--noise_scale', String(options.noiseScale),
+      '--noise_w_scale', String(options.noiseWScale),
+      '--sentence_silence', String(options.sentenceSilence),
+      '--volume', String(options.volume),
+    ], {
       input: `${spokenText}\n`,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -184,7 +270,7 @@ export function generateVoiceoverSegments({ captions, engine, outputDir, spawnSy
   });
 }
 
-export function buildAudioMixFilter(captions) {
+export function buildAudioMixFilter(captions, env = process.env) {
   const timeline = buildCaptionTimeline(captions);
   if (!timeline.length) throw new Error('Cannot build an audio mix without captions.');
   const delayed = timeline.map((caption, index) => {
@@ -193,19 +279,21 @@ export function buildAudioMixFilter(captions) {
   });
   const inputs = timeline.map((_, index) => `[a${index}]`).join('');
   delayed.push(`${inputs}amix=inputs=${timeline.length}:duration=longest:dropout_transition=0:normalize=1[aout]`);
+  const normalization = resolveAudioNormalization(env);
+  delayed.push(`[aout]aresample=48000,loudnorm=I=${normalization.integratedLoudness}:TP=${normalization.maxTruePeak}:LRA=${normalization.loudnessRange}:linear=false[anorm]`);
   return delayed.join(';');
 }
 
-export function buildMuxArgs({ inputVideo, audioFiles, captions, output, format }) {
+export function buildMuxArgs({ inputVideo, audioFiles, captions, output, format, env = process.env }) {
   if (!Array.isArray(audioFiles) || !audioFiles.length) {
     throw new Error('Cannot mux voiceover without generated audio segments.');
   }
   const args = ['-y', '-i', inputVideo];
   for (const audioFile of audioFiles) args.push('-i', audioFile);
   args.push(
-    '-filter_complex', buildAudioMixFilter(captions),
+    '-filter_complex', buildAudioMixFilter(captions, env),
     '-map', '0:v:0',
-    '-map', '[aout]',
+    '-map', '[anorm]',
   );
 
   if (format === 'webm') {
@@ -220,9 +308,9 @@ export function buildMuxArgs({ inputVideo, audioFiles, captions, output, format 
   return args;
 }
 
-export function muxVoiceover({ ffmpeg, inputVideo, audioFiles, captions, output, format, execFile = execFileSync }) {
+export function muxVoiceover({ ffmpeg, inputVideo, audioFiles, captions, output, format, env = process.env, execFile = execFileSync }) {
   mkdirSync(path.dirname(output), { recursive: true });
-  const args = buildMuxArgs({ inputVideo, audioFiles, captions, output, format });
+  const args = buildMuxArgs({ inputVideo, audioFiles, captions, output, format, env });
   try {
     execFile(ffmpeg, args, { stdio: 'ignore' });
   } catch (error) {
