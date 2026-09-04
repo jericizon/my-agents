@@ -16,6 +16,15 @@ description: Global engineering and safety rules for all repositories
 
 ---
 
+## SCOPED CONTEXT RULES
+
+- Never read every workflow file up front.
+- Inspect only the relevant surrounding code before expanding context.
+- Never scan the whole repository unless the current task requires it.
+- Use target file reads and searches; do not use broad scans when a targeted inspection can answer the question.
+
+---
+
 ## REQUEST CLASSIFICATION
 
 Classify every task before starting:
