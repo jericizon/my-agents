@@ -30,15 +30,25 @@ Do NOT use only when the turn contains no task request:
 
 ## Mandatory Orchestration Contract
 
-For every task-oriented invocation, this skill is a required orchestration contract: spawn or designate exactly one orchestrator sub-agent before discovery, implementation, or any other delegation, regardless of task size, complexity, type, simplicity, or whether the task appears to need only one skill. The orchestrator must understand the request, clarify unresolved ambiguity, classify the work, establish acceptance criteria and constraints, map dependencies, and decompose the work before routing implementation subtasks. Do not delegate against unresolved assumptions.
+For every task-oriented invocation, this skill is a required orchestration contract: spawn or designate exactly one orchestrator sub-agent before discovery, implementation, or any other delegation, regardless of task size, complexity, type, simplicity, or whether the task appears to need only one skill. The orchestrator must understand the request, clarify unresolved ambiguity, classify the work, establish acceptance criteria and constraints, map dependencies, and decompose the work into tickets, producing a full spec and implementation plan for each ticket before routing implementation subtasks. Do not delegate against unresolved assumptions.
 
 The orchestrator routes scoped subtasks rather than broadcasting the full original message to unrelated agents. Each implementation sub-agent receives its subtask, relevant acceptance criteria, shared feature context, dependencies and prerequisite outputs, applicable skills and constraints, and expected reporting format. All sub-agents report evidence, changed surfaces, blockers, and status to the orchestrator; the orchestrator is the only reporting boundary for the consolidated result.
 
-For each behavior-changing feature, bug fix, or cohesive workstream, designate exactly one dedicated QA sub-agent at workstream start, regardless of the number of dependent implementation tasks. Keep that QA owner across the workstream. Its QA context package includes clarified intent and scope, acceptance criteria and out-of-scope behavior, the task/dependency breakdown, affected surfaces, implementation summaries or diffs, expected real-user workflows, risks and edge cases, automated results, and environment prerequisites. The QA owner invokes `real-user-qa`, validates task checkpoints as prerequisites become available, and performs a final integrated end-to-end pass. Additional QA owners require genuinely independent workstreams, specialized validation expertise, or an explicit user request for parallel QA.
+Model tiers are fixed regardless of task size: the orchestrator and the dedicated QA sub-agent run on the highest-capability model available, and every implementation sub-agent runs on the lowest, token-efficient model. Resolve the two tiers through whichever harness is running the session — never assume one vendor: Devin CLI → `devin models list` (cheapest e.g. `swe-2`, `deepseek-v4-flash`, `glm-5.3-flash`; frontier e.g. `opus`, `gpt`); Claude Code → `haiku` for implementation, `opus`/`sonnet` for orchestrator/QA; Codex → low/medium effort for implementation, high/xhigh for orchestrator/QA; any other harness → its cheapest capable tier for implementation, its frontier tier for orchestrator/QA. Frontier tokens are for planning and validation; mechanical execution gets the cheapest model that can follow the plan. Sub-agent prompts stay minimal: ticket plan, acceptance criteria, constraints, reporting format — nothing else.
 
-When QA finds a failure, route the finding and evidence to the responsible implementation sub-agent, update shared context, and re-validate. Cap the implementation-to-QA loop at three cycles per feature/workstream; after the third unsuccessful cycle, stop and escalate with attempts, evidence, unresolved risk, and limitations. Completion requires appropriate automated verification and dedicated real-user validation, unless runtime validation is unavailable; report that limitation instead of claiming full QA completion.
+For each behavior-changing feature, bug fix, or cohesive workstream, designate exactly one dedicated QA sub-agent at the same model level as the orchestrator at workstream start, regardless of the number of dependent implementation tasks. Keep that QA owner across the workstream. Its QA context package includes clarified intent and scope, acceptance criteria and out-of-scope behavior, the task/dependency breakdown, affected surfaces, implementation summaries or diffs, expected real-user workflows, risks and edge cases, automated results, and environment prerequisites. The QA owner invokes `real-user-qa`, validates task checkpoints as prerequisites become available, and performs a final integrated end-to-end pass. Additional QA owners require genuinely independent workstreams, specialized validation expertise, or an explicit user request for parallel QA.
+
+When QA finds a failure, route the finding and evidence to the responsible implementation sub-agent, update shared context, and re-validate. Cap the implementation-to-QA loop at three cycles per feature/workstream; after the third unsuccessful cycle, stop and escalate with attempts, evidence, unresolved risk, and limitations. Completion requires appropriate automated verification and dedicated real-user validation, unless runtime validation is unavailable; report that limitation instead of claiming full QA completion. When all tasks pass, the QA owner reports to the orchestrator with the changes made — files touched, behavior changed, and verification evidence — not just a pass/fail status.
 
 Route task-related follow-ups, clarifications, corrections, and scope changes through the same orchestrator and preserve the same QA owner unless the work becomes a separate workstream. Only genuinely non-task turns—pure acknowledgements, standalone explanations, and unrelated conversation—are exempt from orchestration, implementation delegation, and real-user QA.
+
+## Ticket Execution Rules
+
+1. **Spec and plan per ticket.** The orchestrator writes a full spec and implementation plan for every ticket before delegation (`spec-driven-development` → `writing-plans`). Implementation sub-agents execute plans; they do not re-plan.
+2. **Cheap hands, expensive heads.** Implementation sub-agents run on the lowest token-efficient model; the orchestrator and QA sub-agent run on the orchestrator-level model. Never spend frontier tokens on mechanical execution. Resolve tiers via the active harness (see the model-tier rule above) — Devin, Claude Code, Codex, or anything else.
+3. **Async with file-conflict avoidance.** Run tickets asynchronously (background sub-agents) for throughput, but two tickets that touch the same file must never run concurrently. The orchestrator maps file ownership per ticket at planning time, batches file-disjoint tickets to run in parallel, and queues tickets sharing files to run sequentially in dependency order.
+4. **Tests only for changed files.** Implementation and QA run tests scoped to the files each ticket changed (plus direct dependents when the test framework requires them). Never run the full suite by default; a full-suite run needs explicit justification or a user request.
+5. **QA gates the report.** The dedicated QA sub-agent validates all completed tasks against their acceptance criteria. Only after every task passes does QA report to the orchestrator, and that report must enumerate the changes made (files, behavior, evidence).
 
 The orchestrator alone presents the consolidated report to the main agent or user. Include clarified scope, delegated work and dependency status, changed files or behavior, automated evidence, real-user QA scenarios and outcomes, retry count, limitations, risks, and final, blocked, or escalated status.
 
@@ -60,6 +70,13 @@ Task arrives
     ├─ 7. Reconcile & prune → dedup overlaps, drop skills that add no value for THIS task
     ├─ 8. Order: process → implementation → task-specific validation → final quality gate → ship
     └─ 9. Announce the combined plan, delegate scoped work, and follow each selected skill exactly
+
+Ticket loop (per batch, after step 9):
+    A. Orchestrator writes full spec + plan per ticket
+    B. Batch file-disjoint tickets → async implementation sub-agents on the token-efficient model
+    C. Tickets sharing files run sequentially in dependency order
+    D. QA sub-agent (orchestrator-level model) validates all tasks — tests scoped to changed files only
+    E. All pass → QA reports to orchestrator with the changes made → consolidated report
 ```
 
 ## Final Quality Gate for Code Changes
@@ -69,7 +86,7 @@ For every task that changes source code, tests, scripts, configuration, schemas,
 1. **Review:** Run `code-review-and-quality` against the clarified scope, acceptance criteria, constraints, security, regressions, and existing patterns.
 2. **Simplify:** Run `code-simplification` to address unnecessary complexity, duplication, unclear naming, and avoidable indirection without changing intended behavior.
 3. **Clean:** Check for and remove clearly safe, in-scope dead or unnecessary code, dependencies, branches, tests, and artifacts. Do not remove code based only on an assumption that it is unused.
-4. **Verify:** Run `verification-before-completion` on the post-cleanup state, including relevant automated tests and required real-user or manual validation.
+4. **Verify:** Run `verification-before-completion` on the post-cleanup state, including automated tests scoped to the changed files (full suite only with explicit justification) and required real-user or manual validation.
 
 The orchestrator records review findings, cleanup performed or deemed unnecessary, dead-code findings, verification commands and results, QA outcomes, limitations, and unresolved risks. If any stage fails, is skipped, unavailable, or unreported, do not claim completion; route required fixes through the implementation and existing QA loop, then repeat the gate. Documentation-only, explanation-only, and investigation-only tasks use task-appropriate validation but do not require this code-quality gate.
 
@@ -127,6 +144,7 @@ If the instruction is self-contained and unambiguous ("rename this variable", "f
 | Design review / "make this look better" | **ui-ux-pro-max** (audit against guidelines) → design-taste-frontend → code-review-and-quality |
 | Browser / UI QA | comprehensive-qa-testing or browser-testing-with-devtools |
 | Ship / release | git-workflow-and-versioning → verification-before-completion → shipping-and-launch |
+| Multi-ticket batch | spec-driven-development → writing-plans → subagent-driven-development / dispatching-parallel-agents (async, file-disjoint batches) → code-review-and-quality |
 
 These are starting points. Always prune task-specific skills to what the specific task needs, but never prune the final quality gate for an in-scope code change. The clarity gate is applied before classification, so any task that is vague first runs `interview-me`, and the resulting clarified intent is used to classify the task and select the remaining skills.
 
@@ -150,3 +168,7 @@ Then invoke and follow each selected skill exactly, in order.
 - **Designing without querying `ui-ux-pro-max`.** Picking colors, fonts, spacing, or chart types from memory produces generic output. Query the database first, then build.
 - **Treating `ui-ux-pro-max` as the builder.** It supplies design decisions; `frontend-ui-engineering` still writes the code.
 - **Skipping the clarity gate.** If the instruction is vague and you proceed directly to classification or implementation, you will build against unstated assumptions. Run `interview-me` first when the criteria in the Clarity Gate section are met.
+- **Running implementation on a frontier model.** Implementation sub-agents get the lowest token-efficient model; only the orchestrator and QA run on the orchestrator-level model.
+- **Running two tickets that touch the same file concurrently.** Async execution requires file-disjoint batching; overlapping tickets queue sequentially.
+- **Running the full test suite by default.** Scope tests to changed files unless a full run is explicitly justified.
+- **Accepting a QA report that only says "passed".** The QA report to the orchestrator must include the changes made — files, behavior, evidence.
