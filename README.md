@@ -6,6 +6,7 @@ Local manager for Superpowers skills with:
 - an upstream Superpowers mirror at `superpowers-fork`
 - an upstream Addy Osmani `agent-skills` mirror at `agent-skills-fork`
 - an upstream `ui-ux-pro-max-skill` mirror at `ui-ux-fork` (only the `ui-ux-pro-max` skill is imported)
+- the canonical Universal AI Coding Agent Policy at `shared/policy/TASK_CONTINUITY.md`
 
 The scripts in this repo keep one generated skills source in this workspace, then expose it to both Codex and Claude Code.
 
@@ -19,6 +20,8 @@ The scripts in this repo keep one generated skills source in this workspace, the
 
 - `superpowers-agents/skills/`: generated sync target used as the shared runtime skill source
 - `custom/skills/`: editable local custom/override skills copied into the generated mirror on setup/update
+- `shared/policy/TASK_CONTINUITY.md`: canonical Universal AI Coding Agent Policy (v2.0), linked to `~/.config/agent-workflow/TASK_CONTINUITY.md` on sync
+- `quota-recovery-controller.sh`: recovery controller for usage-limit interruptions (policy Section 12)
 - `superpowers-fork/`: upstream Superpowers mirror used as one update source
 - `agent-skills-fork/`: upstream Addy Osmani `agent-skills` mirror used as a second update source
 - `ui-ux-fork/`: upstream `nextlevelbuilder/ui-ux-pro-max-skill` mirror; its skills live under `.claude/skills/` and only the names in `UI_UX_SKILL_ALLOWLIST` are imported
@@ -85,11 +88,47 @@ The sync script creates symlinks (with automatic backups if a target file exists
 - `~/.antigravity/AGENTS.md`
 - `~/.devin/AGENTS.md`
 
+It also links the task continuity policy to:
+
+```text
+~/.config/agent-workflow/TASK_CONTINUITY.md -> <this-repo>/shared/policy/TASK_CONTINUITY.md
+```
+
 New device flow:
 1. Pull this repository.
 2. Run `./sync-agents.sh`
 
 Any future edits to `shared/rules/global_rules.md` immediately apply to all linked CLIs.
+
+## Task Continuity and Quota Recovery
+
+The Universal AI Coding Agent Policy (v2.0) lives at `shared/policy/TASK_CONTINUITY.md` and is referenced from the global rules, so every configured harness loads it. It requires a durable checkpoint at `.superpowers/CURRENT_TASK.md` for every non-trivial, multi-step task (see that file for the template).
+
+When a harness hits a usage limit, record the failure and let the controller handle waiting and resumption:
+
+```bash
+# Record a failure event (agent or human, right after the limit is hit)
+./quota-recovery-controller.sh record \
+  --harness devin --project /path/to/project --task-id my-task \
+  --session-id brisk-otter --category quota \
+  --progress "Implemented X, tests pending"
+
+# Check state
+./quota-recovery-controller.sh status --project /path/to/project --task-id my-task
+
+# Wait until the next eligible retry, then print (or with --yes, execute) the
+# verified resume command; requires interactive confirmation without --yes
+./quota-recovery-controller.sh run --project /path/to/project --task-id my-task
+
+# After the resumed session finishes, record the outcome
+./quota-recovery-controller.sh resolve --project /path/to/project --task-id my-task --outcome succeeded
+```
+
+Behavior and safety:
+- Categories `auth`, `billing`, `permission` are recorded as `BLOCKED`; `run` refuses them because waiting cannot fix them.
+- Retries are bounded (default 8, intervals double from 300s, capped at 3600s; override with `--max-retries` / `--interval-seconds`).
+- Resume commands use only mechanisms verified against the installed harness versions (see Appendix A of the policy). Unknown harnesses or categories stop without inventing anything.
+- State lives at `<project>/.superpowers/recovery/<task-id>.state`; it stores IDs and paths only, never secrets.
 
 ## Add or Override a Skill
 

@@ -9,6 +9,7 @@ UI_UX_FORK_DIR="$SCRIPT_DIR/ui-ux-fork"
 SOURCE_DIR="$SCRIPT_DIR/superpowers-agents"
 SKILLS_DIR="$SOURCE_DIR/skills"
 SOURCE_RULES="$SCRIPT_DIR/shared/rules/global_rules.md"
+SOURCE_POLICY="$SCRIPT_DIR/shared/policy/TASK_CONTINUITY.md"
 UPSTREAM_REPO="https://github.com/obra/superpowers.git"
 AGENT_SKILLS_UPSTREAM_REPO="https://github.com/addyosmani/agent-skills.git"
 UI_UX_UPSTREAM_REPO="https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git"
@@ -81,9 +82,26 @@ install_symlink_or_copy() {
 
 ensure_rules_source_exists() {
     if [ ! -f "$SOURCE_RULES" ]; then
-        echo "ERROR: Canonical rules file not found: $SOURCE_RULES"
+        echo "ERROR: Canonical rules file not found: $SOURCE_RULES" >&2
         exit 1
     fi
+}
+
+ensure_policy_source_exists() {
+    if [ ! -f "$SOURCE_POLICY" ]; then
+        echo "ERROR: Canonical policy file not found: $SOURCE_POLICY" >&2
+        exit 1
+    fi
+}
+
+install_policy() {
+    local target="$HOME/.config/agent-workflow/TASK_CONTINUITY.md"
+
+    echo "Installing task continuity policy from:"
+    echo "  $SOURCE_POLICY"
+    echo ""
+
+    install_symlink "$SOURCE_POLICY" "$target"
 }
 
 install_runtime_paths() {
@@ -298,6 +316,7 @@ echo "Running unified agents sync..."
 echo ""
 
 ensure_rules_source_exists
+ensure_policy_source_exists
 setup_mirror_repo "$FORK_DIR" "$UPSTREAM_REPO" "Superpowers"
 setup_mirror_repo "$AGENT_SKILLS_FORK_DIR" "$AGENT_SKILLS_UPSTREAM_REPO" "agent-skills"
 setup_mirror_repo "$UI_UX_FORK_DIR" "$UI_UX_UPSTREAM_REPO" "ui-ux-pro-max"
@@ -313,4 +332,7 @@ echo ""
 install_global_rules
 
 echo ""
-echo "Done. Skills and global rules are up to date."
+install_policy
+
+echo ""
+echo "Done. Skills, global rules, and task continuity policy are up to date."

@@ -45,6 +45,19 @@ STOP and ask questions.
 
 ---
 
+## TASK CONTINUITY POLICY
+
+Canonical policy: `~/.config/agent-workflow/TASK_CONTINUITY.md` (Universal AI Coding Agent Policy v2.0 — cross-harness continuity, quota recovery, sub-agent orchestration, TDD, QA). Read it for any non-trivial task; it defines the full checkpoint schema and recovery procedures.
+
+* Maintain a durable checkpoint at `.superpowers/CURRENT_TASK.md` for every non-trivial, multi-step task. Update it after meaningful milestones, before interruptions, and when blocked. Never store secrets in checkpoints.
+* Use explicit statuses: `PLANNING`, `IN_PROGRESS`, `WAITING_FOR_QUOTA`, `BLOCKED`, `READY_TO_RESUME`, `QA_IN_PROGRESS`, `NEEDS_USER_INPUT`, `COMPLETED`. Mark `COMPLETED` only when acceptance criteria and verification pass.
+* On usage limits, identify the actual cause (quota vs. billing vs. auth vs. rate limit), update the checkpoint, and record recovery state with `quota-recovery-controller.sh` (my-agents repo root). Never assume waiting fixes billing/auth/permission issues.
+* Verify harness capabilities before relying on them; do not assume session-resume flags, hooks, or quota APIs from one harness exist in another. Never invent undocumented mechanisms.
+* Sub-agents: define scope, file ownership, acceptance criteria, and checkpoint location before delegating; never run two workers on the same files; the main agent independently verifies integrated results before claiming completion.
+* If the policy file is unavailable, do not pretend it was loaded; proceed with these rules and record the limitation.
+
+---
+
 ## WORKFLOW
 
 Before implementation:
