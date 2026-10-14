@@ -9,13 +9,13 @@
  *   h.BASE                      base URL passed on the CLI
  *   h.viewport                  { width, height }
  *   h.goto(pathOrUrl)           navigate (relative paths resolve against BASE), waits networkidle
- *   h.caption(text)             update the on-screen subtitle/narration bar (pass '' to hide); this text is spoken in voiceover mode
- *   h.glideClick(locator, opts) glide the cursor to the element, then click  (opts: {steps, settle})
- *   h.glideTo(locator, opts)    glide the cursor to the element without clicking
- *   h.highlight(locator, opts)  draw the pulsing spotlight box around an element (opts: {padding})
- *   h.clearHighlight()          hide the spotlight box
+ *   h.caption(text)             set the subtitle text in the dedicated bottom caption lane (pass '' to hide); this text is spoken in voiceover mode
+ *   h.glideClick(locator, opts) glide the cursor to the element, then click  (opts: {ms, settle})
+ *   h.glideTo(locator, opts)    glide the cursor to the element without clicking (opts: {ms} glide duration)
+ *   h.highlight(locator, opts)  dim the page and draw the glowing accent ring around an element (opts: {padding})
+ *   h.clearHighlight()          hide the spotlight ring and scrim
  *   h.explain(locator, text, opts) glide + highlight + caption + read-pause, in one call
- *                                (opts: {steps, read}) — use this to walk EVERY meaningful
+ *                                (opts: {ms, read}) — use this to walk EVERY meaningful
  *                                control on the page, not only the ones the flow acts on
  *   h.type(locator, text)       realistic per-key typing
  *   h.shot(label)               capture a numbered milestone screenshot (NNN_label.png)

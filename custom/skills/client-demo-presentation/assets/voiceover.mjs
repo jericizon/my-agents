@@ -284,10 +284,11 @@ export function buildAudioMixFilter(captions, env = process.env) {
   return delayed.join(';');
 }
 
-export function buildMuxArgs({ inputVideo, audioFiles, captions, output, format, env = process.env }) {
+export function buildMuxArgs({ inputVideo, audioFiles, captions, output, format, env = process.env, fps }) {
   if (!Array.isArray(audioFiles) || !audioFiles.length) {
     throw new Error('Cannot mux voiceover without generated audio segments.');
   }
+  const frameRate = Math.max(1, Math.round(Number(fps ?? env.DEMO_FPS) || 60));
   const args = ['-y', '-i', inputVideo];
   for (const audioFile of audioFiles) args.push('-i', audioFile);
   args.push(
@@ -299,7 +300,7 @@ export function buildMuxArgs({ inputVideo, audioFiles, captions, output, format,
   if (format === 'webm') {
     args.push('-c:v', 'copy', '-c:a', 'libopus', '-b:a', '128k');
   } else if (format === 'mp4') {
-    args.push('-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-r', '24', '-c:a', 'aac', '-b:a', '128k');
+    args.push('-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-r', String(frameRate), '-c:a', 'aac', '-b:a', '128k');
   } else {
     throw new Error(`Unsupported voiceover output format: ${format}`);
   }
@@ -308,9 +309,9 @@ export function buildMuxArgs({ inputVideo, audioFiles, captions, output, format,
   return args;
 }
 
-export function muxVoiceover({ ffmpeg, inputVideo, audioFiles, captions, output, format, env = process.env, execFile = execFileSync }) {
+export function muxVoiceover({ ffmpeg, inputVideo, audioFiles, captions, output, format, env = process.env, execFile = execFileSync, fps }) {
   mkdirSync(path.dirname(output), { recursive: true });
-  const args = buildMuxArgs({ inputVideo, audioFiles, captions, output, format, env });
+  const args = buildMuxArgs({ inputVideo, audioFiles, captions, output, format, env, fps });
   try {
     execFile(ffmpeg, args, { stdio: 'ignore' });
   } catch (error) {

@@ -8,10 +8,11 @@ description: Use when the user wants a client-presentable or stakeholder demo wa
 ## Overview
 
 Produce a polished, client-presentable walkthrough of one feature in the already-running
-app: a real Chromium screen recording with a **visible animated mouse cursor**, **on-screen
-subtitle captions** narrating each step, **milestone screenshots**, and **one whole demo
-video** (`.mp4` plus `.webm`). With `--voiceover`, the same captions become a synchronized
-spoken voiceover track in the final video.
+app: a real Chromium screen recording with a **visible animated mouse cursor**, **subtitle
+captions in a dedicated bottom lane** narrating each step, **milestone screenshots**, and
+**one whole demo video** (`.mp4` plus `.webm`, mp4 normalized to constant 60fps). With
+`--voiceover`, the same captions become a synchronized spoken voiceover track in the final
+video.
 
 This is **presentation, not QA**. It does not fix bugs or write tests — it tells the story
 of how to use a feature for a non-technical audience. If the feature is broken or needs
@@ -41,14 +42,17 @@ Do NOT use this skill when:
 - Assume the application is **already running**. Never start a dev/preview/watch server.
 - The recorded flow must use a **visible moving cursor** (glide between targets) — not raw clicks.
 - **Every step must have a subtitle caption** so a non-technical viewer can follow along.
+  Captions render inside a reserved dark lane across the bottom of the frame (~8% of the
+  viewport height), never floating over app content.
 - **Explain the whole page, not just the happy path.** Before (or while) performing the task,
   walk every meaningful control on the page — inputs, toggles, dropdowns, tabs, secondary
   buttons — with `h.explain(locator, text)`, even controls the flow itself never touches.
   A viewer should come away understanding the whole page, not just the three fields that
   were filled in.
 - **Highlight what's being narrated.** Whenever a caption discusses a specific element, that
-  element must have the spotlight box on it (`h.explain`, or `h.highlight` + `h.caption`
-  directly) so the viewer's focus lands exactly where the narration is pointing.
+  element must have the spotlight on it (`h.explain`, or `h.highlight` + `h.caption`
+  directly): the page dims behind a scrim while the element stays lit inside a soft glowing
+  accent ring, so the viewer's focus lands exactly where the narration is pointing.
 - **Follow through to downstream/related pages.** If completing the action changes or creates
   content that renders somewhere else (e.g. an admin/CMS editor publishing a page that then
   appears on the public site), the demo must navigate to that resulting page and show/explain
@@ -203,7 +207,7 @@ Notes:
   targeting `-16 LUFS`, `-1.5 dBTP`, and `7 LU` by default. See
   https://ffmpeg.org/ffmpeg-filters.html#loudnorm.
 - Flags also settable via env: `DEMO_BASE / DEMO_FLOW / DEMO_OUT / DEMO_NAME / DEMO_WIDTH /
-  DEMO_HEIGHT / DEMO_HEADED / DEMO_VOICEOVER / DEMO_TTS_ENGINE / DEMO_TTS_BIN /
+  DEMO_HEIGHT / DEMO_FPS / DEMO_HEADED / DEMO_VOICEOVER / DEMO_TTS_ENGINE / DEMO_TTS_BIN /
   DEMO_TTS_MODEL / DEMO_AUDIO_TARGET_LUFS / DEMO_AUDIO_MAX_TRUE_PEAK / DEMO_AUDIO_TARGET_LRA /
   DEMO_TTS_LENGTH_SCALE / DEMO_TTS_NOISE_SCALE / DEMO_TTS_NOISE_W_SCALE /
   DEMO_TTS_SENTENCE_SILENCE / DEMO_TTS_VOLUME`. `DEMO_TTS_VOICE` is setup-only: it chooses the
@@ -213,6 +217,12 @@ Notes:
   other than where `node_modules` was installed.
 - Run with no `--flow` to record a placeholder open-only clip that verifies the setup. It
   includes voiceover only when a caption is supplied by the flow.
+- The `.mp4` is normalized to constant frame rate (`--fps` / `DEMO_FPS`, default **60fps**).
+  Cursor glides are `requestAnimationFrame`-driven so captured pointer motion is as smooth
+  as the pipeline allows; the `.webm` stays the native variable-frame-rate capture.
+- Subtitles live only inside the dedicated bottom caption lane, so they never overlap the
+  app. Elements that would end up under the lane are auto-scrolled up before the cursor
+  moves to them — still avoid demoing bottom-anchored UI that cannot scroll.
 - Voiceover segments start at their corresponding caption timestamps. Leave enough `h.sleep(...)`
   after the final caption for the generated speech to finish before recording stops; split long
   final captions or increase the pause instead of trimming the audio.
@@ -228,12 +238,12 @@ The flow file exports `default async function runFlow(page, h)` and uses:
 | Helper | Purpose |
 |--------|---------|
 | `h.goto(path)` | navigate (relative resolves against `--base`), waits networkidle |
-| `h.caption(text)` | set the on-screen subtitle bar (the narration script); with `--voiceover`, the same text is spoken |
-| `h.glideClick(locator)` | glide the visible cursor to the element, then click |
-| `h.glideTo(locator)` | glide the cursor to the element without clicking |
-| `h.highlight(locator)` | draw the pulsing spotlight box around an element's bounding rect |
-| `h.clearHighlight()` | hide the spotlight box |
-| `h.explain(locator, text)` | glide + highlight + caption + read-pause — the "explain this control" beat |
+| `h.caption(text)` | set the subtitle text in the bottom caption lane (the narration script); with `--voiceover`, the same text is spoken |
+| `h.glideClick(locator)` | glide the visible cursor to the element, then click (opts: `{ms}` glide duration) |
+| `h.glideTo(locator)` | glide the cursor to the element without clicking (opts: `{ms}`) |
+| `h.highlight(locator)` | dim the page and draw the glowing accent ring around an element (opts: `{padding}`) |
+| `h.clearHighlight()` | hide the spotlight ring and scrim |
+| `h.explain(locator, text)` | glide + highlight + caption + read-pause — the "explain this control" beat (opts: `{ms, read}`) |
 | `h.type(locator, text)` | realistic per-key typing |
 | `h.shot(label)` | capture numbered milestone screenshot `NNN_label.png` |
 | `h.sleep(ms)` | pause so viewers can read the screen |

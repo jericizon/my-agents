@@ -34,6 +34,7 @@
  *   --name <name>    Output file base name              (env DEMO_NAME; default "demo")
  *   --width <px>     Viewport width                     (env DEMO_WIDTH;  default 1920)
  *   --height <px>    Viewport height                    (env DEMO_HEIGHT; default 1080)
+ *   --fps <n>        Output constant frame rate for .mp4 (env DEMO_FPS;   default 60)
  *   --headed         Run with a visible browser (needs a display; default headless)
  *   --voiceover      Generate TTS voiceover from h.caption() calls
  *
@@ -102,7 +103,13 @@ const CONFIG = {
   },
   HEADLESS: !(args.headed || process.env.DEMO_HEADED),
   VOICEOVER: isVoiceoverEnabled(args.voiceover ?? process.env.DEMO_VOICEOVER),
+  FPS: Math.max(1, Math.round(Number(args.fps || process.env.DEMO_FPS) || 60)),
 };
+
+// Reserved subtitle strip at the bottom of the frame (~8% of height): captions live
+// only inside it, so they never float over app content.
+const CAPTION_LANE_PX = Math.max(56, Math.round(CONFIG.VIEWPORT.height * 0.082));
+const CAPTION_FONT_PX = Math.max(16, Math.round(CONFIG.VIEWPORT.height * 0.02));
 
 let voiceoverEngine = null;
 let ffmpegPath = null;
@@ -119,9 +126,9 @@ if (CONFIG.VOICEOVER) {
   }
 }
 
-// ── Injected per-document overlay: animated cursor + caption (subtitle) bar ───
+// ── Injected per-document overlay: animated cursor + caption lane + spotlight ──
 // Runs before page scripts on every navigation, so it survives reloads/route changes.
-const overlayInit = () => {
+const overlayInit = ({ lanePx, fontPx }) => {
   const install = () => {
     if (document.getElementById('__demoCursor')) return;
     // Real arrow-pointer glyph (SVG), not a dot — tip sits at (4,2) in the 28x28 box.
@@ -137,44 +144,84 @@ const overlayInit = () => {
       'margin:-2px 0 0 -4px', `background:url("data:image/svg+xml,${cursorSvg}") no-repeat`,
       'background-size:contain', 'filter:drop-shadow(0 1px 2px rgba(0,0,0,.5))',
       'z-index:2147483647', 'pointer-events:none', 'transform-origin:4px 2px',
-      'transition:left .07s linear, top .07s linear, transform .1s ease',
+      'transition:transform .1s ease',
     ].join(';');
     document.documentElement.appendChild(c);
 
-    // Netflix-style subtitle: tight box hugging the text, bottom-center, white bold caps-friendly text.
+    // Cursor glide driven by requestAnimationFrame: every rAF tick repaints, so the
+    // captured cursor motion is as smooth as the display pipeline allows (~60fps).
+    // While a glide is running, real mousemove events are ignored so they can't yank
+    // the cursor mid-animation; h.glideTo syncs the real pointer afterwards.
+    window.__demoGlide = (x, y, ms) => new Promise((done) => {
+      window.__demoCursorBusy = true;
+      const sx = parseFloat(c.style.left) || 0;
+      const sy = parseFloat(c.style.top) || 0;
+      const dur = (Number.isFinite(ms) && ms > 0)
+        ? ms
+        : Math.min(950, Math.max(380, Math.hypot(x - sx, y - sy) * 1.15));
+      let settled = false;
+      const finish = () => {
+        if (settled) return; // ignore the safety timeout if rAF already finished
+        settled = true;
+        c.style.left = `${x}px`; c.style.top = `${y}px`;
+        window.__demoCursorBusy = false;
+        done();
+      };
+      const t0 = performance.now();
+      const step = (now) => {
+        const p = Math.min(1, (now - t0) / dur);
+        const e = p < 0.5 ? 4 * p * p * p : 1 - ((-2 * p + 2) ** 3) / 2; // easeInOutCubic
+        c.style.left = `${sx + (x - sx) * e}px`;
+        c.style.top = `${sy + (y - sy) * e}px`;
+        if (p < 1) requestAnimationFrame(step);
+        else finish();
+      };
+      requestAnimationFrame(step);
+      setTimeout(finish, dur + 600); // safety net if rAF stalls (e.g. occluded headless)
+    });
+
+    // Dedicated caption lane: a reserved strip across the bottom of the frame that
+    // holds the subtitle text — it never floats over app content mid-screen.
     const cap = document.createElement('div');
     cap.id = '__demoCaption';
     cap.style.cssText = [
-      'position:fixed', 'left:50%', 'bottom:6%', 'transform:translateX(-50%)',
-      'max-width:85%', 'width:max-content', 'box-sizing:border-box', 'padding:4px 14px',
-      'color:#fff', 'font:700 30px/1.35 "Helvetica Neue",Helvetica,Arial,sans-serif',
-      'letter-spacing:.2px', 'text-shadow:0 1px 2px rgba(0,0,0,.6)',
-      'background:rgba(0,0,0,.75)', 'border-radius:3px',
+      'position:fixed', 'left:0', 'right:0', 'bottom:0', `height:${lanePx}px`,
+      'display:flex', 'align-items:center', 'justify-content:center',
+      'padding:0 48px', 'box-sizing:border-box',
+      'background:rgba(8,9,12,.97)', 'border-top:1px solid rgba(255,255,255,.08)',
       'z-index:2147483647', 'pointer-events:none',
-      'opacity:0', 'transition:opacity .25s ease', 'text-align:center',
     ].join(';');
+    const capText = document.createElement('div');
+    capText.id = '__demoCaptionText';
+    capText.style.cssText = [
+      'color:#f4f5f7', `font:600 ${fontPx}px/1.4 "Inter","Helvetica Neue",Helvetica,Arial,sans-serif`,
+      'letter-spacing:.15px', 'text-align:center', 'max-width:82%',
+      'opacity:0', 'transition:opacity .2s ease',
+    ].join(';');
+    cap.appendChild(capText);
     document.documentElement.appendChild(cap);
 
-    // Spotlight box: draws an animated frame around whatever element is currently
-    // being explained, so viewer focus lands on exactly the control being narrated.
+    // Spotlight: modern product-tour look — the rest of the page dims behind a scrim
+    // while the narrated element stays lit inside a soft glowing accent ring.
     const style = document.createElement('style');
     style.textContent = '@keyframes __demoPulse {'
-      + '0%,100% { box-shadow:0 0 0 4px rgba(255,176,32,.25), 0 0 18px 4px rgba(255,176,32,.35); }'
-      + '50% { box-shadow:0 0 0 8px rgba(255,176,32,.15), 0 0 26px 8px rgba(255,176,32,.55); } }';
+      + '0%,100% { box-shadow:0 0 0 9999px rgba(8,9,12,.55), 0 0 0 3px rgba(99,102,241,.30), 0 0 22px rgba(99,102,241,.35); }'
+      + '50% { box-shadow:0 0 0 9999px rgba(8,9,12,.55), 0 0 0 6px rgba(99,102,241,.16), 0 0 36px rgba(99,102,241,.55); } }';
     document.documentElement.appendChild(style);
 
     const hl = document.createElement('div');
     hl.id = '__demoHighlight';
     hl.style.cssText = [
       'position:fixed', 'left:-9999px', 'top:-9999px', 'width:0', 'height:0',
-      'border:3px solid #ffb020', 'border-radius:8px',
-      'animation:__demoPulse 1.4s ease-in-out infinite',
+      'border:2px solid #6366f1', 'border-radius:10px',
+      'animation:__demoPulse 1.6s ease-in-out infinite',
       'z-index:2147483646', 'pointer-events:none', 'opacity:0',
       'transition:left .25s ease, top .25s ease, width .25s ease, height .25s ease, opacity .2s ease',
     ].join(';');
     document.documentElement.appendChild(hl);
 
     addEventListener('mousemove', (e) => {
+      if (window.__demoCursorBusy) return;
       c.style.left = `${e.clientX}px`; c.style.top = `${e.clientY}px`;
     }, true);
     addEventListener('mousedown', () => { c.style.transform = 'scale(.85)'; }, true);
@@ -225,7 +272,7 @@ async function loadFlow(flowPath) {
     viewport: CONFIG.VIEWPORT,
     recordVideo: { dir: videoDir, size: CONFIG.VIEWPORT },
   });
-  await context.addInitScript(overlayInit);
+  await context.addInitScript(overlayInit, { lanePx: CAPTION_LANE_PX, fontPx: CAPTION_FONT_PX });
   const page = await context.newPage();
 
   const toUrl = (p) => (/^https?:\/\//.test(p) ? p : CONFIG.BASE.replace(/\/$/, '') + (p.startsWith('/') ? p : `/${p}`));
@@ -233,6 +280,28 @@ async function loadFlow(flowPath) {
   const captionTimeline = [];
   const elapsedMs = () => Number(process.hrtime.bigint() - recordingStartedAt) / 1e6;
   let shotN = 0;
+  const laneTop = CONFIG.VIEWPORT.height - CAPTION_LANE_PX;
+  // Measure an element, first scrolling it clear of the caption lane if it would
+  // land underneath (lane occupies the bottom of the frame for subtitles only).
+  const targetBox = async (loc) => {
+    await loc.scrollIntoViewIfNeeded().catch(() => {});
+    let b = await loc.boundingBox();
+    if (b && b.y + b.height > laneTop - 8) {
+      await loc.evaluate((el) => el.scrollIntoView({ block: 'center', behavior: 'instant' })).catch(() => {});
+      b = await loc.boundingBox();
+    }
+    return b;
+  };
+  // Animate the overlay cursor to the box center, then park the real pointer there
+  // so hover state/click land correctly.
+  const glideCursor = async (b, ms) => {
+    const x = b.x + b.width / 2;
+    const y = Math.min(b.y + b.height / 2, laneTop - 4);
+    await page.evaluate(([px, py, d]) => (
+      window.__demoGlide ? window.__demoGlide(px, py, d) : null
+    ), [x, y, ms]).catch(() => {});
+    await page.mouse.move(x, y).catch(() => {});
+  };
   const h = {
     page, BASE: CONFIG.BASE, viewport: CONFIG.VIEWPORT, sleep,
     goto: (p = '/', opts = {}) => page.goto(toUrl(p), { waitUntil: 'networkidle', ...opts }),
@@ -240,25 +309,22 @@ async function loadFlow(flowPath) {
       const text = String(t ?? '');
       captionTimeline.push({ text, at: elapsedMs() });
       await page.evaluate((x) => {
-        const cap = document.getElementById('__demoCaption');
+        const cap = document.getElementById('__demoCaptionText');
         if (cap) { cap.textContent = x; cap.style.opacity = x ? '1' : '0'; }
       }, text).catch(() => {});
     },
-    glideTo: async (loc, { steps = 28 } = {}) => {
-      await loc.scrollIntoViewIfNeeded().catch(() => {});
-      const b = await loc.boundingBox();
-      if (b) await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps });
+    glideTo: async (loc, { ms } = {}) => {
+      const b = await targetBox(loc);
+      if (b) await glideCursor(b, ms);
     },
-    glideClick: async (loc, { steps = 28, settle = 350 } = {}) => {
-      await loc.scrollIntoViewIfNeeded().catch(() => {});
-      const b = await loc.boundingBox();
-      if (b) { await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps }); await sleep(settle); }
+    glideClick: async (loc, { ms, settle = 350 } = {}) => {
+      const b = await targetBox(loc);
+      if (b) { await glideCursor(b, ms); await sleep(settle); }
       await loc.click();
     },
-    // Draw the spotlight box around an element's bounding rect (viewer focus cue).
-    highlight: async (loc, { padding = 6 } = {}) => {
-      await loc.scrollIntoViewIfNeeded().catch(() => {});
-      const b = await loc.boundingBox();
+    // Draw the spotlight ring around an element's bounding rect (viewer focus cue).
+    highlight: async (loc, { padding = 8 } = {}) => {
+      const b = await targetBox(loc);
       if (!b) return;
       await page.evaluate(({ x, y, w, hgt, pad }) => {
         const el = document.getElementById('__demoHighlight');
@@ -276,8 +342,8 @@ async function loadFlow(flowPath) {
     }).catch(() => {}),
     // Compound "explain this element" beat: glide cursor + spotlight + subtitle + read pause.
     // Use this to walk every meaningful control on a page, not only the ones acted on.
-    explain: async (loc, text, { steps = 24, read = 1800 } = {}) => {
-      await h.glideTo(loc, { steps });
+    explain: async (loc, text, { ms, read = 1800 } = {}) => {
+      await h.glideTo(loc, { ms });
       await h.highlight(loc);
       await h.caption(text);
       await sleep(read);
@@ -325,6 +391,7 @@ async function loadFlow(flowPath) {
           captions: captionTimeline,
           output: target,
           format: 'webm',
+          fps: CONFIG.FPS,
         });
         verifyAudioStream({ ffmpeg: ffmpegPath, mediaPath: target });
         webmOutput = target;
@@ -334,7 +401,7 @@ async function loadFlow(flowPath) {
         const mp4 = path.join(CONFIG.OUT_DIR, `${CONFIG.NAME}.mp4`);
         try {
           execFileSync(ffmpegPath, ['-y', '-i', target, '-map', '0:v:0', '-map', '0:a:0',
-            '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-r', '24',
+            '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-r', String(CONFIG.FPS),
             '-c:a', 'aac', '-b:a', '128k', mp4], { stdio: 'ignore' });
           verifyAudioStream({ ffmpeg: ffmpegPath, mediaPath: mp4 });
           if (existsSync(mp4)) { out = mp4; console.log('MP4=' + mp4); console.log('AUDIO_STREAM=' + mp4); }
@@ -357,7 +424,7 @@ async function loadFlow(flowPath) {
         const ffmpeg = requireFrom('ffmpeg-static');
         const mp4 = path.join(CONFIG.OUT_DIR, `${CONFIG.NAME}.mp4`);
         execFileSync(ffmpeg, ['-y', '-i', target, '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
-          '-movflags', '+faststart', '-r', '24', mp4], { stdio: 'ignore' });
+          '-movflags', '+faststart', '-r', String(CONFIG.FPS), mp4], { stdio: 'ignore' });
         if (existsSync(mp4)) { out = mp4; console.log('MP4=' + mp4); }
       } catch { console.warn('[recorder] ffmpeg-static not installed; .webm is the deliverable'); }
     }
