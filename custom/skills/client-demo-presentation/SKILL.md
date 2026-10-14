@@ -223,6 +223,11 @@ Notes:
 - Subtitles live only inside the dedicated bottom caption lane, so they never overlap the
   app. Elements that would end up under the lane are auto-scrolled up before the cursor
   moves to them — still avoid demoing bottom-anchored UI that cannot scroll.
+- Off-screen targets are brought into view with native **smooth scrolling** (the recorder
+  waits for the scroll to settle before the cursor glides), so long pages scroll with a
+  visible animated pan instead of an instant jump.
+- The spotlight fades out automatically before every `h.glideTo`/`h.glideClick`/`h.goto`,
+  so a stale ring never trails the cursor or survives a navigation/route change.
 - Voiceover segments start at their corresponding caption timestamps. Leave enough `h.sleep(...)`
   after the final caption for the generated speech to finish before recording stops; split long
   final captions or increase the pause instead of trimming the audio.

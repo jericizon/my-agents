@@ -281,14 +281,34 @@ async function loadFlow(flowPath) {
   const elapsedMs = () => Number(process.hrtime.bigint() - recordingStartedAt) / 1e6;
   let shotN = 0;
   const laneTop = CONFIG.VIEWPORT.height - CAPTION_LANE_PX;
-  // Measure an element, first scrolling it clear of the caption lane if it would
-  // land underneath (lane occupies the bottom of the frame for subtitles only).
+  const hideHighlight = () => page.evaluate(() => {
+    const el = document.getElementById('__demoHighlight');
+    if (el) el.style.opacity = '0';
+  }).catch(() => {});
+  // Measure an element for cursor/spotlight placement. When the target is off-screen
+  // or would land under the caption lane, bring it into view with native smooth
+  // scrolling and wait for the scroll to settle before reporting the box.
   const targetBox = async (loc) => {
-    await loc.scrollIntoViewIfNeeded().catch(() => {});
-    let b = await loc.boundingBox();
-    if (b && b.y + b.height > laneTop - 8) {
-      await loc.evaluate((el) => el.scrollIntoView({ block: 'center', behavior: 'instant' })).catch(() => {});
-      b = await loc.boundingBox();
+    let b = await loc.boundingBox().catch(() => null);
+    if (!b) {
+      await loc.scrollIntoViewIfNeeded().catch(() => {});
+      b = await loc.boundingBox().catch(() => null);
+      if (!b) return null;
+    }
+    if (b.y < 0 || b.y + b.height > laneTop - 8) {
+      await loc.evaluate((el) => el.scrollIntoView({ block: 'center', behavior: 'smooth' })).catch(() => {});
+      const deadline = Date.now() + 1500;
+      let last = null;
+      while (Date.now() < deadline) {
+        await sleep(120);
+        const next = await loc.boundingBox().catch(() => null);
+        const stable = next && last
+          && Math.abs(next.x - last.x) < 1 && Math.abs(next.y - last.y) < 1
+          && Math.abs(next.width - last.width) < 1 && Math.abs(next.height - last.height) < 1;
+        last = next || last;
+        if (stable) break;
+      }
+      b = last || b;
     }
     return b;
   };
@@ -304,7 +324,10 @@ async function loadFlow(flowPath) {
   };
   const h = {
     page, BASE: CONFIG.BASE, viewport: CONFIG.VIEWPORT, sleep,
-    goto: (p = '/', opts = {}) => page.goto(toUrl(p), { waitUntil: 'networkidle', ...opts }),
+    goto: async (p = '/', opts = {}) => {
+      await hideHighlight(); // never carry the spotlight across a navigation
+      return page.goto(toUrl(p), { waitUntil: 'networkidle', ...opts });
+    },
     caption: async (t) => {
       const text = String(t ?? '');
       captionTimeline.push({ text, at: elapsedMs() });
@@ -314,10 +337,12 @@ async function loadFlow(flowPath) {
       }, text).catch(() => {});
     },
     glideTo: async (loc, { ms } = {}) => {
+      await hideHighlight(); // fade the old spotlight before the cursor moves on
       const b = await targetBox(loc);
       if (b) await glideCursor(b, ms);
     },
     glideClick: async (loc, { ms, settle = 350 } = {}) => {
+      await hideHighlight();
       const b = await targetBox(loc);
       if (b) { await glideCursor(b, ms); await sleep(settle); }
       await loc.click();
@@ -336,10 +361,7 @@ async function loadFlow(flowPath) {
         el.style.opacity = '1';
       }, { x: b.x, y: b.y, w: b.width, hgt: b.height, pad: padding }).catch(() => {});
     },
-    clearHighlight: () => page.evaluate(() => {
-      const el = document.getElementById('__demoHighlight');
-      if (el) el.style.opacity = '0';
-    }).catch(() => {}),
+    clearHighlight: hideHighlight,
     // Compound "explain this element" beat: glide cursor + spotlight + subtitle + read pause.
     // Use this to walk every meaningful control on a page, not only the ones acted on.
     explain: async (loc, text, { ms, read = 1800 } = {}) => {
