@@ -35,6 +35,7 @@
  *   --width <px>     Viewport width                     (env DEMO_WIDTH;  default 1920)
  *   --height <px>    Viewport height                    (env DEMO_HEIGHT; default 1080)
  *   --fps <n>        Output constant frame rate for .mp4 (env DEMO_FPS;   default 60)
+ *   --no-chrome      Skip the macOS-style browser chrome mockup on the .mp4 (env DEMO_NO_CHROME)
  *   --headed         Run with a visible browser (needs a display; default headless)
  *   --voiceover      Generate TTS voiceover from h.caption() calls
  *
@@ -51,7 +52,7 @@
  */
 import { createRequire } from 'module';
 import { execFileSync } from 'child_process';
-import { existsSync, mkdirSync, rmSync, readdirSync, copyFileSync } from 'fs';
+import { existsSync, mkdirSync, rmSync, readdirSync, copyFileSync, writeFileSync } from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import {
@@ -104,26 +105,140 @@ const CONFIG = {
   HEADLESS: !(args.headed || process.env.DEMO_HEADED),
   VOICEOVER: isVoiceoverEnabled(args.voiceover ?? process.env.DEMO_VOICEOVER),
   FPS: Math.max(1, Math.round(Number(args.fps || process.env.DEMO_FPS) || 60)),
+  // macOS-style browser chrome mockup composited above the recording in post.
+  CHROME: !(args['no-chrome'] || /^(1|true|yes|on)$/i.test(String(process.env.DEMO_NO_CHROME ?? '').trim())),
 };
 
-// Reserved subtitle strip at the bottom of the frame (~8% of height): captions live
-// only inside it, so they never float over app content.
-const CAPTION_LANE_PX = Math.max(56, Math.round(CONFIG.VIEWPORT.height * 0.082));
-const CAPTION_FONT_PX = Math.max(16, Math.round(CONFIG.VIEWPORT.height * 0.02));
+// Layout of the composited .mp4 canvas: the recording floats as a browser window
+// (chrome bar + page) on a dark backdrop with a drop shadow; subtitles burn into a
+// dedicated strip BELOW the window — outside the browser, never over app content.
+// All pixel constants are evened so libx264/yuv420p always gets even dimensions.
+const even = (n) => n - (n % 2);
+const CHROME_BAR_PX = even(Math.max(64, Math.round(CONFIG.VIEWPORT.height * 0.082)));
+const MARGIN_X = even(Math.round(CONFIG.VIEWPORT.width * 0.025));
+const MARGIN_TOP = MARGIN_X;
+const CAPTION_GAP = even(Math.round(CONFIG.VIEWPORT.height * 0.026));
+const CAPTION_STRIP = even(Math.max(80, Math.round(CONFIG.VIEWPORT.height * 0.089)));
+const MARGIN_BOTTOM = even(Math.round(CONFIG.VIEWPORT.height * 0.041));
+const CANVAS_W = even(CONFIG.VIEWPORT.width + (CONFIG.CHROME ? MARGIN_X * 2 : 0));
+const CANVAS_H = even(CONFIG.CHROME
+  ? MARGIN_TOP + CHROME_BAR_PX + CONFIG.VIEWPORT.height + CAPTION_GAP + CAPTION_STRIP + MARGIN_BOTTOM
+  : CONFIG.VIEWPORT.height + CAPTION_GAP + CAPTION_STRIP + MARGIN_BOTTOM);
+const WINDOW_RADIUS = 14;
 
 let voiceoverEngine = null;
 let ffmpegPath = null;
+try {
+  ffmpegPath = requireFrom('ffmpeg-static');
+  if (!ffmpegPath || !existsSync(ffmpegPath)) ffmpegPath = null;
+} catch { ffmpegPath = null; }
 if (CONFIG.VOICEOVER) {
   try {
     voiceoverEngine = resolveTtsEngine();
-    ffmpegPath = requireFrom('ffmpeg-static');
-    if (!ffmpegPath || !existsSync(ffmpegPath)) {
-      throw new Error('ffmpeg-static did not provide an available executable path.');
-    }
   } catch (e) {
     console.error(`[recorder] Voiceover unavailable: ${e.message}`);
     process.exit(1);
   }
+}
+if (CONFIG.VOICEOVER && !ffmpegPath) {
+  console.error('[recorder] Voiceover unavailable: ffmpeg-static is required but not installed.');
+  process.exit(1);
+}
+// When ffmpeg can post-process, captions burn below the browser window; otherwise the
+// in-page caption lane keeps captions visible in the raw .webm deliverable.
+const BURN_CAPTIONS = !!ffmpegPath;
+const IN_PAGE_LANE_PX = BURN_CAPTIONS ? 0 : Math.max(56, Math.round(CONFIG.VIEWPORT.height * 0.082));
+const CAPTION_FONT_PX = Math.max(16, Math.round(CONFIG.VIEWPORT.height * 0.02));
+
+// ── macOS-style browser mockup (floating window) ──────────────────────────────
+// Two PNGs rendered with the same Chromium composite the mockup around the recording:
+//   backdrop.png — dark canvas + the window's drop shadow (under the video)
+//   frame.png    — chrome bar + rounded border ring with a transparent hole (over it)
+// Subtitles burn below the window via a timed ASS track, so nothing covers app content.
+const CHROME_STYLE = `
+  html,body{margin:0;padding:0;background:transparent}
+  .bar{position:relative;box-sizing:border-box;display:flex;align-items:center;
+    background:linear-gradient(180deg,#f5f5f7 0%,#e9e9ee 100%);border-bottom:1px solid #c8c8d0}
+  .lights{display:flex;gap:8px;margin-left:22px}
+  .light{width:13px;height:13px;border-radius:50%;box-shadow:inset 0 0 1px rgba(0,0,0,.25)}
+  .nav{display:flex;align-items:center;gap:16px;margin-left:28px}
+  .pill{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    width:52%;height:56%;background:#fff;border:1px solid #d6d6dd;border-radius:10px;
+    box-shadow:0 1px 2px rgba(0,0,0,.06)}
+  .plus{position:absolute;right:24px;display:flex;align-items:center}
+`;
+const chromeBarInner = () => `
+  <div class="lights">
+    <span class="light" style="background:#ff5f57"></span>
+    <span class="light" style="background:#febc2e"></span>
+    <span class="light" style="background:#28c840"></span>
+  </div>
+  <div class="nav">
+    <svg width="15" height="15" viewBox="0 0 15 15"><path d="M9.5 3 L5 7.5 L9.5 12" stroke="#7c7c84" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <svg width="15" height="15" viewBox="0 0 15 15"><path d="M5.5 3 L10 7.5 L5.5 12" stroke="#c6c6cd" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span style="font-size:15px;line-height:1;color:#7c7c84">&#8635;</span>
+  </div>
+  <div class="pill"></div>
+  <div class="plus"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 2 V12 M2 7 H12" stroke="#a6a6ae" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+`;
+// Browser window frame: chrome bar on top, transparent hole for the recording,
+// thin border ring with rounded bottom corners so the video's square edges hide.
+const frameDoc = (width, height, chromePx, radius) => `<!doctype html><html><head><meta charset="utf-8">
+<style>${CHROME_STYLE}
+  .win{position:relative;width:${width}px;height:${height}px}
+  .bar{width:${width}px;height:${chromePx}px;border-radius:${radius}px ${radius}px 0 0}
+  .ring{position:absolute;left:0;right:0;top:${chromePx}px;bottom:0;
+    border:2px solid #cfd2d8;border-top:none;border-radius:0 0 ${radius}px ${radius}px}
+</style></head><body>
+<div class="win"><div class="bar">${chromeBarInner()}</div><div class="ring"></div></div>
+</body></html>`;
+// Canvas backdrop: dark gradient + the floating window's drop shadow.
+const backdropDoc = (width, height, winX, winY, winW, winH, radius) => `<!doctype html><html><head><meta charset="utf-8">
+<style>html,body{margin:0;padding:0}
+  body{width:${width}px;height:${height}px;background:linear-gradient(180deg,#141821 0%,#0b0d12 100%)}
+  .win{position:absolute;left:${winX}px;top:${winY}px;width:${winW}px;height:${winH}px;
+    background:#fff;border-radius:${radius}px;
+    box-shadow:0 30px 80px rgba(0,0,0,.55),0 8px 24px rgba(0,0,0,.45)}
+</style></head><body><div class="win"></div></body></html>`;
+
+const assTime = (ms) => {
+  const cs = Math.max(0, Math.round(ms / 10));
+  const h = Math.floor(cs / 360000);
+  const m = Math.floor(cs / 6000) % 60;
+  const s = Math.floor(cs / 100) % 60;
+  return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cs % 100).padStart(2, '0')}`;
+};
+
+// Timed text track (URL pill text, burned captions). PlayRes matches the composite
+// canvas, so alignment + margins land exactly where the layout puts them.
+function buildAssTrack(segments, { fontPx, color, align, marginV, marginLR, wrap }) {
+  const dialogues = [];
+  segments.forEach((seg, i) => {
+    let text = String(seg.text ?? '').replace(/[{}]/g, '').trim();
+    if (!text) return;
+    const start = Math.max(0, Math.round(seg.at));
+    const end = Math.round(segments[i + 1]?.at ?? 3.6e6);
+    if (end <= start) return;
+    dialogues.push(`Dialogue: 0,${assTime(start)},${assTime(end)},Demo,,,,,,${text}`);
+  });
+  if (!dialogues.length) return null;
+  return [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    `PlayResX: ${CANVAS_W}`,
+    `PlayResY: ${CANVAS_H}`,
+    `WrapStyle: ${wrap}`,
+    'ScaledBorderAndShadow: yes',
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    `Style: Demo,sans-serif,${fontPx},${color},&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,${align},${marginLR},${marginLR},${marginV},1`,
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+    ...dialogues,
+    '',
+  ].join('\n');
 }
 
 // ── Injected per-document overlay: animated cursor + caption lane + spotlight ──
@@ -180,26 +295,29 @@ const overlayInit = ({ lanePx, fontPx }) => {
       setTimeout(finish, dur + 600); // safety net if rAF stalls (e.g. occluded headless)
     });
 
-    // Dedicated caption lane: a reserved strip across the bottom of the frame that
+    // Dedicated caption lane (fallback only, when ffmpeg can't burn captions below
+    // the browser window): a reserved strip across the bottom of the frame that
     // holds the subtitle text — it never floats over app content mid-screen.
-    const cap = document.createElement('div');
-    cap.id = '__demoCaption';
-    cap.style.cssText = [
-      'position:fixed', 'left:0', 'right:0', 'bottom:0', `height:${lanePx}px`,
-      'display:flex', 'align-items:center', 'justify-content:center',
-      'padding:0 48px', 'box-sizing:border-box',
-      'background:rgba(8,9,12,.97)', 'border-top:1px solid rgba(255,255,255,.08)',
-      'z-index:2147483647', 'pointer-events:none',
-    ].join(';');
-    const capText = document.createElement('div');
-    capText.id = '__demoCaptionText';
-    capText.style.cssText = [
-      'color:#f4f5f7', `font:600 ${fontPx}px/1.4 "Inter","Helvetica Neue",Helvetica,Arial,sans-serif`,
-      'letter-spacing:.15px', 'text-align:center', 'max-width:82%',
-      'opacity:0', 'transition:opacity .2s ease',
-    ].join(';');
-    cap.appendChild(capText);
-    document.documentElement.appendChild(cap);
+    if (lanePx > 0) {
+      const cap = document.createElement('div');
+      cap.id = '__demoCaption';
+      cap.style.cssText = [
+        'position:fixed', 'left:0', 'right:0', 'bottom:0', `height:${lanePx}px`,
+        'display:flex', 'align-items:center', 'justify-content:center',
+        'padding:0 48px', 'box-sizing:border-box',
+        'background:rgba(8,9,12,.97)', 'border-top:1px solid rgba(255,255,255,.08)',
+        'z-index:2147483647', 'pointer-events:none',
+      ].join(';');
+      const capText = document.createElement('div');
+      capText.id = '__demoCaptionText';
+      capText.style.cssText = [
+        'color:#f4f5f7', `font:600 ${fontPx}px/1.4 "Inter","Helvetica Neue",Helvetica,Arial,sans-serif`,
+        'letter-spacing:.15px', 'text-align:center', 'max-width:82%',
+        'opacity:0', 'transition:opacity .2s ease',
+      ].join(';');
+      cap.appendChild(capText);
+      document.documentElement.appendChild(cap);
+    }
 
     // Spotlight: modern product-tour look — the rest of the page dims behind a scrim
     // while the narrated element stays lit inside a soft glowing accent ring.
@@ -268,19 +386,50 @@ async function loadFlow(flowPath) {
   mkdirSync(shotsDir, { recursive: true });
 
   const browser = await chromium.launch({ headless: CONFIG.HEADLESS });
+
+  // Render the mockup PNGs with the same Chromium (clean contexts, no overlay scripts).
+  let backdropPng = null;
+  let framePng = null;
+  if (CONFIG.CHROME) {
+    const winW = CONFIG.VIEWPORT.width;
+    const winH = CHROME_BAR_PX + CONFIG.VIEWPORT.height;
+    const renderPng = async (html, file, width, height, transparent = false) => {
+      const ctx = await browser.newContext({ viewport: { width, height } });
+      const p = await ctx.newPage();
+      await p.setContent(html);
+      await p.screenshot({ path: file, omitBackground: transparent });
+      await ctx.close();
+    };
+    backdropPng = path.join(CONFIG.OUT_DIR, 'backdrop.png');
+    framePng = path.join(CONFIG.OUT_DIR, 'frame.png');
+    await renderPng(backdropDoc(CANVAS_W, CANVAS_H, MARGIN_X, MARGIN_TOP, winW, winH, WINDOW_RADIUS), backdropPng, CANVAS_W, CANVAS_H);
+    await renderPng(frameDoc(winW, winH, CHROME_BAR_PX, WINDOW_RADIUS), framePng, winW, winH, true);
+  }
+
   const context = await browser.newContext({
     viewport: CONFIG.VIEWPORT,
     recordVideo: { dir: videoDir, size: CONFIG.VIEWPORT },
   });
-  await context.addInitScript(overlayInit, { lanePx: CAPTION_LANE_PX, fontPx: CAPTION_FONT_PX });
+  await context.addInitScript(overlayInit, { lanePx: IN_PAGE_LANE_PX, fontPx: CAPTION_FONT_PX });
   const page = await context.newPage();
 
   const toUrl = (p) => (/^https?:\/\//.test(p) ? p : CONFIG.BASE.replace(/\/$/, '') + (p.startsWith('/') ? p : `/${p}`));
   const recordingStartedAt = process.hrtime.bigint();
   const captionTimeline = [];
   const elapsedMs = () => Number(process.hrtime.bigint() - recordingStartedAt) / 1e6;
+  // URL timeline for the chrome pill: poll page.url() so both full navigations and
+  // SPA route changes (pushState) are captured with wall-clock timing.
+  const urlTimeline = [];
+  const urlPoller = CONFIG.CHROME ? setInterval(() => {
+    try {
+      const raw = page.url();
+      const url = raw === 'about:blank' ? '' : raw;
+      const last = urlTimeline[urlTimeline.length - 1];
+      if (url !== (last ? last.url : undefined)) urlTimeline.push({ url, at: elapsedMs() });
+    } catch { /* page is closing */ }
+  }, 200) : null;
   let shotN = 0;
-  const laneTop = CONFIG.VIEWPORT.height - CAPTION_LANE_PX;
+  const laneTop = CONFIG.VIEWPORT.height - IN_PAGE_LANE_PX;
   const hideHighlight = () => page.evaluate(() => {
     const el = document.getElementById('__demoHighlight');
     if (el) el.style.opacity = '0';
@@ -385,6 +534,7 @@ async function loadFlow(flowPath) {
   let err = null;
   try { await runFlow(page, h); }
   catch (e) { err = e; console.error('FLOW_ERROR', e); }
+  if (urlPoller) clearInterval(urlPoller);
 
   const video = page.video();
   await context.close(); // flushes the .webm
@@ -397,6 +547,61 @@ async function loadFlow(flowPath) {
   if (webm) {
     const target = path.join(CONFIG.OUT_DIR, `${CONFIG.NAME}.webm`);
     rmSync(target, { force: true });
+
+    // Composite for the .mp4: the recording floats as a browser window on a dark
+    // backdrop (backdrop shadow < video < frame ring), the live URL burns into the
+    // pill, and captions burn into the strip BELOW the window. The .webm stays raw.
+    let extraInputArgs = [];
+    let videoChain = ''; // empty = start straight from [0:v]
+    let urlAssFile = null;
+    if (CONFIG.CHROME && backdropPng && framePng) {
+      const urlFontPx = Math.max(20, Math.round(CANVAS_W * 0.015));
+      const urlSegments = urlTimeline.map((s) => {
+        const raw = (s.url === 'about:blank' ? '' : String(s.url || '')).replace(/[{}]/g, '').trim();
+        return { text: raw.length > 96 ? `${raw.slice(0, 93)}...` : raw, at: s.at };
+      });
+      const urlAss = buildAssTrack(urlSegments, {
+        fontPx: urlFontPx,
+        color: '&H003E3A3A',
+        align: 8, // top-center, inside the URL pill
+        marginV: MARGIN_TOP + Math.max(8, Math.round((CHROME_BAR_PX - urlFontPx * 1.25) / 2)),
+        marginLR: MARGIN_X + Math.round(CONFIG.VIEWPORT.width * 0.24),
+        wrap: 2,
+      });
+      urlAssFile = urlAss ? 'url.ass' : null;
+      if (urlAss) writeFileSync(path.join(CONFIG.OUT_DIR, urlAssFile), urlAss);
+      extraInputArgs = ['-loop', '1', '-i', 'backdrop.png', '-loop', '1', '-i', 'frame.png'];
+      videoChain = `[1:v][0:v]overlay=${MARGIN_X}:${MARGIN_TOP + CHROME_BAR_PX}:shortest=1[v1];`
+        + `[v1][2:v]overlay=${MARGIN_X}:${MARGIN_TOP}:shortest=1[v2]`;
+    }
+    let captionsFile = null;
+    if (BURN_CAPTIONS) {
+      const capFontPx = Math.max(20, Math.round(CAPTION_STRIP * 0.25));
+      const capAss = buildAssTrack(captionTimeline, {
+        fontPx: capFontPx,
+        color: '&H00F7F5F4',
+        align: 2, // bottom-center, in the strip below the browser window
+        marginV: MARGIN_BOTTOM + Math.max(8, Math.round((CAPTION_STRIP - capFontPx * 1.25) / 2)),
+        marginLR: Math.round(CANVAS_W * 0.12),
+        wrap: 0,
+      });
+      if (capAss) {
+        writeFileSync(path.join(CONFIG.OUT_DIR, 'captions.ass'), capAss);
+        captionsFile = 'captions.ass';
+      }
+    }
+    const subFilters = [];
+    if (urlAssFile) subFilters.push('subtitles=url.ass');
+    if (captionsFile) subFilters.push('subtitles=captions.ass');
+    if (subFilters.length) {
+      videoChain = videoChain.startsWith('[1:v]')
+        ? `${videoChain};[v2]${subFilters.join(',')}[vout]`
+        : `[0:v]pad=ceil(iw/2)*2:ih+${CAPTION_GAP + CAPTION_STRIP + MARGIN_BOTTOM}:0:0:color=0x0b0d12[v1];[v1]${subFilters.join(',')}[vout]`;
+    } else if (videoChain.startsWith('[1:v]')) {
+      videoChain += ';[v2]null[vout]';
+    } else {
+      videoChain = '[0:v]null[vout]';
+    }
 
     if (CONFIG.VOICEOVER) {
       const voiceoverDir = path.join(CONFIG.OUT_DIR, '.voiceover');
@@ -422,9 +627,11 @@ async function loadFlow(flowPath) {
 
         const mp4 = path.join(CONFIG.OUT_DIR, `${CONFIG.NAME}.mp4`);
         try {
-          execFileSync(ffmpegPath, ['-y', '-i', target, '-map', '0:v:0', '-map', '0:a:0',
+          const mp4Args = ['-y', '-i', target, ...extraInputArgs,
+            '-filter_complex', videoChain, '-map', '[vout]', '-map', '0:a:0',
             '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-r', String(CONFIG.FPS),
-            '-c:a', 'aac', '-b:a', '128k', mp4], { stdio: 'ignore' });
+            '-c:a', 'aac', '-b:a', '128k', mp4];
+          execFileSync(ffmpegPath, mp4Args, { cwd: CONFIG.OUT_DIR, stdio: 'ignore' });
           verifyAudioStream({ ffmpeg: ffmpegPath, mediaPath: mp4 });
           if (existsSync(mp4)) { out = mp4; console.log('MP4=' + mp4); console.log('AUDIO_STREAM=' + mp4); }
         } catch (e) {
@@ -442,14 +649,32 @@ async function loadFlow(flowPath) {
       copyFileSync(webm, target); // stable, predictable name
       webmOutput = target;
       out = target;
+      const ffmpeg = requireFrom('ffmpeg-static');
+      const mp4 = path.join(CONFIG.OUT_DIR, `${CONFIG.NAME}.mp4`);
       try {
-        const ffmpeg = requireFrom('ffmpeg-static');
-        const mp4 = path.join(CONFIG.OUT_DIR, `${CONFIG.NAME}.mp4`);
-        execFileSync(ffmpeg, ['-y', '-i', target, '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
-          '-movflags', '+faststart', '-r', String(CONFIG.FPS), mp4], { stdio: 'ignore' });
+        const mp4Args = ['-y', '-i', target, ...extraInputArgs,
+          '-filter_complex', videoChain, '-map', '[vout]',
+          '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+          '-movflags', '+faststart', '-r', String(CONFIG.FPS), mp4];
+        execFileSync(ffmpeg, mp4Args, { cwd: CONFIG.OUT_DIR, stdio: 'ignore' });
         if (existsSync(mp4)) { out = mp4; console.log('MP4=' + mp4); }
-      } catch { console.warn('[recorder] ffmpeg-static not installed; .webm is the deliverable'); }
+      } catch (e) {
+        rmSync(mp4, { force: true }); // never leave a partial mp4 behind
+        console.warn(`[recorder] MP4 conversion failed; .webm is the deliverable: ${e.message}`);
+      }
     }
+  }
+  if (BURN_CAPTIONS || backdropPng) { // transient composite assets — regenerable on every run
+    for (const asset of ['backdrop.png', 'frame.png', 'url.ass', 'captions.ass']) {
+      rmSync(path.join(CONFIG.OUT_DIR, asset), { force: true });
+    }
+  }
+  // Cleanup: keep only the final video + screenshots. The raw Playwright capture and
+  // the .webm copy are intermediates — removed once the .mp4 exists; the .webm stays
+  // only as the fallback deliverable when mp4 encoding failed.
+  rmSync(videoDir, { recursive: true, force: true });
+  if (out && out.endsWith('.mp4')) {
+    rmSync(path.join(CONFIG.OUT_DIR, `${CONFIG.NAME}.webm`), { force: true });
   }
   console.log('WEBM=' + (webmOutput || 'NONE'));
   console.log('SHOTS=' + shotN);

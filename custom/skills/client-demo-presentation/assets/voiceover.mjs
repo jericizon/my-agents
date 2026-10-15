@@ -270,12 +270,13 @@ export function generateVoiceoverSegments({ captions, engine, outputDir, spawnSy
   });
 }
 
-export function buildAudioMixFilter(captions, env = process.env) {
+export function buildAudioMixFilter(captions, env = process.env, inputOffset = 0) {
   const timeline = buildCaptionTimeline(captions);
   if (!timeline.length) throw new Error('Cannot build an audio mix without captions.');
+  const base = 1 + inputOffset;
   const delayed = timeline.map((caption, index) => {
     const delay = Math.max(0, Math.round(caption.at));
-    return `[${index + 1}:a]adelay=${delay}:all=1[a${index}]`;
+    return `[${base + index}:a]adelay=${delay}:all=1[a${index}]`;
   });
   const inputs = timeline.map((_, index) => `[a${index}]`).join('');
   delayed.push(`${inputs}amix=inputs=${timeline.length}:duration=longest:dropout_transition=0:normalize=1[aout]`);
@@ -284,16 +285,24 @@ export function buildAudioMixFilter(captions, env = process.env) {
   return delayed.join(';');
 }
 
-export function buildMuxArgs({ inputVideo, audioFiles, captions, output, format, env = process.env, fps }) {
+export function buildMuxArgs({ inputVideo, audioFiles, captions, output, format, env = process.env, fps, videoChain, extraInputArgs = [] }) {
   if (!Array.isArray(audioFiles) || !audioFiles.length) {
     throw new Error('Cannot mux voiceover without generated audio segments.');
   }
   const frameRate = Math.max(1, Math.round(Number(fps ?? env.DEMO_FPS) || 60));
-  const args = ['-y', '-i', inputVideo];
+  const args = ['-y', '-i', inputVideo, ...extraInputArgs];
   for (const audioFile of audioFiles) args.push('-i', audioFile);
+  const extraCount = extraInputArgs.filter((arg) => arg === '-i').length;
+  const audioFilter = buildAudioMixFilter(captions, env, extraCount);
+  let videoMap = '0:v:0';
+  let filter = audioFilter;
+  if (format === 'mp4' && videoChain) {
+    filter = `${videoChain};${audioFilter}`;
+    videoMap = '[vout]';
+  }
   args.push(
-    '-filter_complex', buildAudioMixFilter(captions, env),
-    '-map', '0:v:0',
+    '-filter_complex', filter,
+    '-map', videoMap,
     '-map', '[anorm]',
   );
 
@@ -309,11 +318,11 @@ export function buildMuxArgs({ inputVideo, audioFiles, captions, output, format,
   return args;
 }
 
-export function muxVoiceover({ ffmpeg, inputVideo, audioFiles, captions, output, format, env = process.env, execFile = execFileSync, fps }) {
+export function muxVoiceover({ ffmpeg, inputVideo, audioFiles, captions, output, format, env = process.env, execFile = execFileSync, fps, videoChain, extraInputArgs = [], cwd }) {
   mkdirSync(path.dirname(output), { recursive: true });
-  const args = buildMuxArgs({ inputVideo, audioFiles, captions, output, format, env, fps });
+  const args = buildMuxArgs({ inputVideo, audioFiles, captions, output, format, env, fps, videoChain, extraInputArgs });
   try {
-    execFile(ffmpeg, args, { stdio: 'ignore' });
+    execFile(ffmpeg, args, cwd ? { stdio: 'ignore', cwd } : { stdio: 'ignore' });
   } catch (error) {
     throw new Error(`ffmpeg failed while adding voiceover: ${error.message}`);
   }

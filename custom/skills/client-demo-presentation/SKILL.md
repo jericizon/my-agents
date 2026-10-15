@@ -9,10 +9,12 @@ description: Use when the user wants a client-presentable or stakeholder demo wa
 
 Produce a polished, client-presentable walkthrough of one feature in the already-running
 app: a real Chromium screen recording with a **visible animated mouse cursor**, **subtitle
-captions in a dedicated bottom lane** narrating each step, **milestone screenshots**, and
-**one whole demo video** (`.mp4` plus `.webm`, mp4 normalized to constant 60fps). With
-`--voiceover`, the same captions become a synchronized spoken voiceover track in the final
-video.
+captions burned below the browser window** narrating each step, **milestone screenshots**,
+and **one whole demo video** (`.mp4` plus `.webm`, mp4 normalized to constant 60fps) — the
+recording floats as a **macOS-style browser window** (traffic lights, nav glyphs, URL bar
+with the live URL) on a dark canvas with a **drop shadow**, and subtitles live **outside
+the browser wrapper**. With `--voiceover`, the same captions become a synchronized spoken
+voiceover track in the final video.
 
 This is **presentation, not QA**. It does not fix bugs or write tests — it tells the story
 of how to use a feature for a non-technical audience. If the feature is broken or needs
@@ -42,8 +44,8 @@ Do NOT use this skill when:
 - Assume the application is **already running**. Never start a dev/preview/watch server.
 - The recorded flow must use a **visible moving cursor** (glide between targets) — not raw clicks.
 - **Every step must have a subtitle caption** so a non-technical viewer can follow along.
-  Captions render inside a reserved dark lane across the bottom of the frame (~8% of the
-  viewport height), never floating over app content.
+  Captions burn into a dedicated strip below the browser window in the final `.mp4` —
+  outside the wrapper, never floating over app content.
 - **Explain the whole page, not just the happy path.** Before (or while) performing the task,
   walk every meaningful control on the page — inputs, toggles, dropdowns, tabs, secondary
   buttons — with `h.explain(locator, text)`, even controls the flow itself never touches.
@@ -136,8 +138,9 @@ self-contained phases, in order:
    tooling setup once, then run `assets/demo-recorder.mjs` against the running app with the
    Phase B flow, outputting into the `docs/client-demo/<timestamp>_<feature>/` directory.
 
-5. **Verify the deliverable.** Confirm the directory contains the `.mp4`/`.webm` video, the
-   numbered screenshots under `screenshots/`, and that the recorder exited 0 (no `FLOW_ERROR`).
+5. **Verify the deliverable.** Confirm the directory contains the `.mp4` (plus `.webm`
+   only if mp4 encoding failed), the numbered screenshots under `screenshots/`, and that
+   the recorder exited 0 (no `FLOW_ERROR`).
    If the flow errored, fix the flow file (selectors/timing) and re-record. Then **copy the
    final `.mp4` to `$JHECKBOT_MEDIA_DIR/capture.mp4`** if that env var is set, so the video
    renders inline in the chat reply. Report the artifact paths to the user.
@@ -207,7 +210,7 @@ Notes:
   targeting `-16 LUFS`, `-1.5 dBTP`, and `7 LU` by default. See
   https://ffmpeg.org/ffmpeg-filters.html#loudnorm.
 - Flags also settable via env: `DEMO_BASE / DEMO_FLOW / DEMO_OUT / DEMO_NAME / DEMO_WIDTH /
-  DEMO_HEIGHT / DEMO_FPS / DEMO_HEADED / DEMO_VOICEOVER / DEMO_TTS_ENGINE / DEMO_TTS_BIN /
+  DEMO_HEIGHT / DEMO_FPS / DEMO_NO_CHROME / DEMO_HEADED / DEMO_VOICEOVER / DEMO_TTS_ENGINE / DEMO_TTS_BIN /
   DEMO_TTS_MODEL / DEMO_AUDIO_TARGET_LUFS / DEMO_AUDIO_MAX_TRUE_PEAK / DEMO_AUDIO_TARGET_LRA /
   DEMO_TTS_LENGTH_SCALE / DEMO_TTS_NOISE_SCALE / DEMO_TTS_NOISE_W_SCALE /
   DEMO_TTS_SENTENCE_SILENCE / DEMO_TTS_VOLUME`. `DEMO_TTS_VOICE` is setup-only: it chooses the
@@ -219,10 +222,18 @@ Notes:
   includes voiceover only when a caption is supplied by the flow.
 - The `.mp4` is normalized to constant frame rate (`--fps` / `DEMO_FPS`, default **60fps**).
   Cursor glides are `requestAnimationFrame`-driven so captured pointer motion is as smooth
-  as the pipeline allows; the `.webm` stays the native variable-frame-rate capture.
-- Subtitles live only inside the dedicated bottom caption lane, so they never overlap the
-  app. Elements that would end up under the lane are auto-scrolled up before the cursor
-  moves to them — still avoid demoing bottom-anchored UI that cannot scroll.
+  as the pipeline allows. Once the `.mp4` exists, the raw capture (`video/`) and the
+  intermediate `.webm` are deleted automatically.
+- The `.mp4` composites the recording as a **floating browser window** on a dark canvas:
+  macOS-style chrome bar (traffic lights, nav glyphs, URL pill with the live URL) on top,
+  rounded corners, and a drop shadow so the window pops off the background. Composited in
+  post-production, so it never covers app content. The pill URL is tracked by polling
+  (SPA route changes included); long URLs are truncated. Disable the mockup with
+  `--no-chrome` or `DEMO_NO_CHROME=1` (the mp4 then letterboxes the raw video only).
+- Subtitles burn into a dedicated strip **below the browser window** — outside the
+  wrapper, never over app content. Because they are burned in post, the raw `.webm` and
+  the milestone screenshots do not show captions; when ffmpeg is unavailable the recorder
+  falls back to an in-page caption lane so the `.webm` keeps captions.
 - Off-screen targets are brought into view with native **smooth scrolling** (the recorder
   waits for the scroll to settle before the cursor glides), so long pages scroll with a
   visible animated pan instead of an instant jump.
@@ -261,7 +272,6 @@ See `assets/example-flow.mjs` for a complete login walkthrough template.
 docs/client-demo/
 └── 20250620_143022_login/
     ├── login-demo.mp4        # the whole walkthrough (audio included with --voiceover)
-    ├── login-demo.webm       # native or voiceover-muxed recording
     ├── flow.mjs              # the generated flow + caption script (optional to keep)
     └── screenshots/
         ├── 001_open.png
@@ -269,6 +279,11 @@ docs/client-demo/
         ├── 003_password-entered.png
         └── 004_logged-in.png
 ```
+
+After a successful recording the folder is cleaned automatically: the raw Playwright
+capture (`video/`) and the intermediate `.webm` are removed — only the `.mp4` and
+`screenshots/` remain. The `.webm` survives only as the fallback deliverable when mp4
+encoding failed.
 
 ## Completion Standard
 
@@ -282,7 +297,8 @@ A client demo is complete only when:
   and the result shown/explained there too
 - a screenshot exists for each key milestone under `screenshots/`, including explained
   elements and the result on every page involved
-- one whole video exists (`.mp4`, or `.webm` if ffmpeg is unavailable)
+- one whole video exists (`.mp4`, or `.webm` if ffmpeg is unavailable) and the output
+  folder was cleaned to keep only the final video + `screenshots/`
 - when voiceover was requested, the final `.webm` or `.mp4` has a verified audio stream, the
   complete track was loudness-normalized, and the voiceover was generated from the flow's
   non-empty captions
