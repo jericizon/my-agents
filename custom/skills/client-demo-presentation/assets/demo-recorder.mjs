@@ -110,7 +110,7 @@ const CONFIG = {
 };
 
 // Layout of the composited .mp4 canvas: the recording floats as a browser window
-// (chrome bar + page) on a dark backdrop with a drop shadow; subtitles burn into a
+// (chrome bar + page) on a white backdrop with a drop shadow; subtitles burn into a
 // dedicated strip BELOW the window — outside the browser, never over app content.
 // All pixel constants are evened so libx264/yuv420p always gets even dimensions.
 const even = (n) => n - (n % 2);
@@ -148,11 +148,11 @@ if (CONFIG.VOICEOVER && !ffmpegPath) {
 // in-page caption lane keeps captions visible in the raw .webm deliverable.
 const BURN_CAPTIONS = !!ffmpegPath;
 const IN_PAGE_LANE_PX = BURN_CAPTIONS ? 0 : Math.max(56, Math.round(CONFIG.VIEWPORT.height * 0.082));
-const CAPTION_FONT_PX = Math.max(16, Math.round(CONFIG.VIEWPORT.height * 0.02));
+const CAPTION_FONT_PX = Math.max(20, Math.round(CONFIG.VIEWPORT.height * 0.026));
 
 // ── macOS-style browser mockup (floating window) ──────────────────────────────
 // Two PNGs rendered with the same Chromium composite the mockup around the recording:
-//   backdrop.png — dark canvas + the window's drop shadow (under the video)
+//   backdrop.png — white canvas + the window's drop shadow (under the video)
 //   frame.png    — chrome bar + rounded border ring with a transparent hole (over it)
 // Subtitles burn below the window via a timed ASS track, so nothing covers app content.
 const CHROME_STYLE = `
@@ -192,13 +192,13 @@ const frameDoc = (width, height, chromePx, radius) => `<!doctype html><html><hea
 </style></head><body>
 <div class="win"><div class="bar">${chromeBarInner()}</div><div class="ring"></div></div>
 </body></html>`;
-// Canvas backdrop: dark gradient + the floating window's drop shadow.
+// Canvas backdrop: light gradient + the floating window's drop shadow.
 const backdropDoc = (width, height, winX, winY, winW, winH, radius) => `<!doctype html><html><head><meta charset="utf-8">
 <style>html,body{margin:0;padding:0}
-  body{width:${width}px;height:${height}px;background:linear-gradient(180deg,#141821 0%,#0b0d12 100%)}
+  body{width:${width}px;height:${height}px;background:linear-gradient(180deg,#ffffff 0%,#eef0f3 100%)}
   .win{position:absolute;left:${winX}px;top:${winY}px;width:${winW}px;height:${winH}px;
     background:#fff;border-radius:${radius}px;
-    box-shadow:0 30px 80px rgba(0,0,0,.55),0 8px 24px rgba(0,0,0,.45)}
+    box-shadow:0 30px 80px rgba(0,0,0,.18),0 8px 24px rgba(0,0,0,.12)}
 </style></head><body><div class="win"></div></body></html>`;
 
 const assTime = (ms) => {
@@ -305,13 +305,13 @@ const overlayInit = ({ lanePx, fontPx }) => {
         'position:fixed', 'left:0', 'right:0', 'bottom:0', `height:${lanePx}px`,
         'display:flex', 'align-items:center', 'justify-content:center',
         'padding:0 48px', 'box-sizing:border-box',
-        'background:rgba(8,9,12,.97)', 'border-top:1px solid rgba(255,255,255,.08)',
+        'background:rgba(255,255,255,.97)', 'border-top:1px solid rgba(0,0,0,.08)',
         'z-index:2147483647', 'pointer-events:none',
       ].join(';');
       const capText = document.createElement('div');
       capText.id = '__demoCaptionText';
       capText.style.cssText = [
-        'color:#f4f5f7', `font:600 ${fontPx}px/1.4 "Inter","Helvetica Neue",Helvetica,Arial,sans-serif`,
+        'color:#000000', `font:600 ${fontPx}px/1.4 "Inter","Helvetica Neue",Helvetica,Arial,sans-serif`,
         'letter-spacing:.15px', 'text-align:center', 'max-width:82%',
         'opacity:0', 'transition:opacity .2s ease',
       ].join(';');
@@ -548,7 +548,7 @@ async function loadFlow(flowPath) {
     const target = path.join(CONFIG.OUT_DIR, `${CONFIG.NAME}.webm`);
     rmSync(target, { force: true });
 
-    // Composite for the .mp4: the recording floats as a browser window on a dark
+    // Composite for the .mp4: the recording floats as a browser window on a light
     // backdrop (backdrop shadow < video < frame ring), the live URL burns into the
     // pill, and captions burn into the strip BELOW the window. The .webm stays raw.
     let extraInputArgs = [];
@@ -576,10 +576,10 @@ async function loadFlow(flowPath) {
     }
     let captionsFile = null;
     if (BURN_CAPTIONS) {
-      const capFontPx = Math.max(20, Math.round(CAPTION_STRIP * 0.25));
+      const capFontPx = Math.max(24, Math.round(CAPTION_STRIP * 0.32));
       const capAss = buildAssTrack(captionTimeline, {
         fontPx: capFontPx,
-        color: '&H00F7F5F4',
+        color: '&H00000000',
         align: 2, // bottom-center, in the strip below the browser window
         marginV: MARGIN_BOTTOM + Math.max(8, Math.round((CAPTION_STRIP - capFontPx * 1.25) / 2)),
         marginLR: Math.round(CANVAS_W * 0.12),
@@ -596,7 +596,7 @@ async function loadFlow(flowPath) {
     if (subFilters.length) {
       videoChain = videoChain.startsWith('[1:v]')
         ? `${videoChain};[v2]${subFilters.join(',')}[vout]`
-        : `[0:v]pad=ceil(iw/2)*2:ih+${CAPTION_GAP + CAPTION_STRIP + MARGIN_BOTTOM}:0:0:color=0x0b0d12[v1];[v1]${subFilters.join(',')}[vout]`;
+        : `[0:v]pad=ceil(iw/2)*2:ih+${CAPTION_GAP + CAPTION_STRIP + MARGIN_BOTTOM}:0:0:color=0xffffff[v1];[v1]${subFilters.join(',')}[vout]`;
     } else if (videoChain.startsWith('[1:v]')) {
       videoChain += ';[v2]null[vout]';
     } else {

@@ -12,7 +12,7 @@ app: a real Chromium screen recording with a **visible animated mouse cursor**, 
 captions burned below the browser window** narrating each step, **milestone screenshots**,
 and **one whole demo video** (`.mp4` plus `.webm`, mp4 normalized to constant 60fps) — the
 recording floats as a **macOS-style browser window** (traffic lights, nav glyphs, URL bar
-with the live URL) on a dark canvas with a **drop shadow**, and subtitles live **outside
+with the live URL) on a white canvas with a **drop shadow**, and subtitles live **outside
 the browser wrapper**. With `--voiceover`, the same captions become a synchronized spoken
 voiceover track in the final video.
 
@@ -224,7 +224,7 @@ Notes:
   Cursor glides are `requestAnimationFrame`-driven so captured pointer motion is as smooth
   as the pipeline allows. Once the `.mp4` exists, the raw capture (`video/`) and the
   intermediate `.webm` are deleted automatically.
-- The `.mp4` composites the recording as a **floating browser window** on a dark canvas:
+- The `.mp4` composites the recording as a **floating browser window** on a white canvas:
   macOS-style chrome bar (traffic lights, nav glyphs, URL pill with the live URL) on top,
   rounded corners, and a drop shadow so the window pops off the background. Composited in
   post-production, so it never covers app content. The pill URL is tracked by polling
