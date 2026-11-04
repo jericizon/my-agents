@@ -15,6 +15,9 @@ UI_UX_UPSTREAM_REPO="https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git
 UI_UX_SKILL_ALLOWLIST=("ui-ux-pro-max")
 AGENTS_TARGET="$HOME/.agents"
 CLAUDE_SKILLS_TARGET="$HOME/.claude/skills"
+CODEX_SKILLS_TARGET="$HOME/.codex/skills"
+GEMINI_SKILLS_TARGET="$HOME/.gemini/skills"
+WINDSURF_SKILLS_TARGET="$HOME/.codeium/windsurf/skills"
 TIMESTAMP="$(date +%s)"
 
 backup_target() {
@@ -123,6 +126,61 @@ install_runtime_paths() {
     echo ""
     echo "Syncing Claude Code skills path..."
     install_symlink_or_copy "$SKILLS_DIR" "$CLAUDE_SKILLS_TARGET" "Claude Code skills"
+
+    echo ""
+    echo "Linking generated skills into Codex, Gemini, and Windsurf skill dirs..."
+    link_generated_skills "$CODEX_SKILLS_TARGET"
+    link_generated_skills "$GEMINI_SKILLS_TARGET"
+    link_generated_skills "$WINDSURF_SKILLS_TARGET"
+}
+
+# Codex, Gemini, and Windsurf keep other skill packs in their skills dirs, so
+# we link each generated skill individually and drop links whose target was removed.
+link_generated_skills() {
+    local target_dir="$1"
+    local skill_dir
+    local skill_name
+    local link_path
+    local link_dest
+
+    mkdir -p "$target_dir"
+
+    for link_path in "$target_dir"/*; do
+        [ -L "$link_path" ] || continue
+        link_dest="$(readlink "$link_path")"
+        case "$link_dest" in
+            "$SKILLS_DIR"/*)
+                if [ ! -d "$link_dest" ]; then
+                    echo "Removing stale skill link:"
+                    echo "  $link_path"
+                    rm -f "$link_path"
+                fi
+                ;;
+        esac
+    done
+
+    for skill_dir in "$SKILLS_DIR"/*; do
+        [ -d "$skill_dir" ] || continue
+        skill_name="$(basename "$skill_dir")"
+        link_path="$target_dir/$skill_name"
+
+        if [ -L "$link_path" ] && [ "$(readlink "$link_path")" = "$skill_dir" ]; then
+            continue
+        fi
+
+        if [ -e "$link_path" ] || [ -L "$link_path" ]; then
+            # Keep backups outside the skills dir so they aren't scanned as skills.
+            local backup_dir="$(dirname "$target_dir")/skills-backup.${TIMESTAMP}"
+            mkdir -p "$backup_dir"
+            echo "Backing up existing entry:"
+            echo "  $link_path -> $backup_dir/$skill_name"
+            mv "$link_path" "$backup_dir/$skill_name"
+        fi
+
+        ln -s "$skill_dir" "$link_path"
+        echo "Linked:"
+        echo "  $link_path -> $skill_dir"
+    done
 }
 
 install_global_rules() {

@@ -45,6 +45,7 @@ This will:
 - create/refresh `~/.agents -> <this-repo>/superpowers-agents`
 - create/refresh `~/.claude/skills -> <this-repo>/superpowers-agents/skills`
 - fall back to copying into `~/.claude/skills` only if the Claude symlink cannot be created
+- per-skill-link every generated skill into `~/.codex/skills` and `~/.gemini/skills` (existing packs there are preserved; stale links pruned)
 
 Important:
 - `superpowers-agents/skills` is generated output and is gitignored in this repo

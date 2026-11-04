@@ -17,7 +17,7 @@ Keep new skills in `custom/skills/<skill-name>/SKILL.md` and mirror the existing
 ## Build, Test, and Development Commands
 Run from repository root unless noted.
 
-- `./sync-agents.sh`: refreshes upstream mirrors, rebuilds `superpowers-agents/skills`, refreshes `~/.agents`, `~/.claude/skills`, global rules links, and the policy link.
+- `./sync-agents.sh`: refreshes upstream mirrors, rebuilds `superpowers-agents/skills`, refreshes `~/.agents`, `~/.claude/skills`, per-skill links into `~/.codex/skills` + `~/.gemini/skills`, global rules links, and the policy link.
 - `bash tests/test-sync-agents-idempotent.sh`: end-to-end fixture test of the full sync (offline, temp remotes).
 - `bash tests/test-claude-skills-copy-fallback.sh`: Claude skills copy fallback when symlink fails.
 - `bash tests/test-update-skills-missing-upstream.sh`: missing-`upstream`-remote recovery.
