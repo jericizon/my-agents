@@ -6,7 +6,7 @@ This repository manages the agent skills catalog: upstream mirrors, local overri
 - `forks/`: upstream mirror clones, gitignored and managed by `sync-agents.sh`.
   - `forks/superpowers-fork/`: mirror of `obra/superpowers` (primary skill source, 15 skills).
   - `forks/ui-ux-fork/`: mirror of `nextlevelbuilder/ui-ux-pro-max-skill`; only names in `UI_UX_SKILL_ALLOWLIST` (currently `ui-ux-pro-max`) are imported from `.claude/skills/`.
-- `custom/skills/`: editable local skills and overrides copied into the generated tree last (wins all name conflicts). `using-agent-skills` is vendored here.
+- `custom/skills/`: editable local skills and overrides copied into the generated tree last (wins all name conflicts). `using-my-skills`, the single meta-skill entry point, lives here.
 - `superpowers-agents/skills/`: generated merge target, gitignored — never edit by hand.
 - `shared/rules/global_rules.md`, `shared/policy/TASK_CONTINUITY.md`: canonical global rules and the Universal AI Coding Agent Policy, symlinked into each harness config on sync.
 - `sync-agents.sh`: the only maintenance entrypoint (clone/refresh mirrors → rebuild generated tree → relink runtime paths, rules, policy).

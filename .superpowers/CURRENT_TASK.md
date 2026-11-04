@@ -2,31 +2,33 @@
 
 ## Task ID and Title
 
-TASK-2026-11-04-01 — Rework agent skills: remove agent-skills-fork
+TASK-2026-11-04-02 — Consolidate meta-skills into `using-my-skills`
 
 ## Original Objective
 
-Remove the `agent-skills-fork` upstream mirror (addyosmani/agent-skills) from the
-sync pipeline and drop its 25 imported skills from the generated tree. Keep
-`superpowers-fork` and `ui-ux-fork` mirrors. Vendor `using-agent-skills` into
-`custom/skills` so the `using-my-agents-skill` bridge keeps its lifecycle router.
+Merge `using-agent-skills` (lifecycle router) and `using-my-agents-skill`
+(bridge/orchestrator) into a single custom skill `using-my-skills`, simplifying
+the process. User decisions:
+
+- Big tasks: synchronous pipeline — one orchestrator + one cheap implementation
+  sub-agent + dedicated QA sub-agent per ticket, with checkpoint tracking.
+- Parallel sub-agents ONLY on explicit user request for quick/fast iteration.
+- Minor update: one implementation sub-agent + QA (no orchestrator).
+- Absorb `using-superpowers` discipline rules inline (single entry point).
 
 ## Acceptance Criteria
 
-1. `agent-skills-fork/` directory and gitlink removed; forks gitignored.
-2. `sync-agents.sh` has no agent-skills mirror/import logic; rebuild produces
-   only superpowers + ui-ux-pro-max + custom skills.
-3. `custom/skills/using-agent-skills/` is self-contained (no `../..` refs) and
-   routes only to surviving skills.
-4. `using-my-agents-skill` and `shared/rules/global_rules.md` reference only
-   surviving skill names.
-5. README.md + AGENTS.md describe the new layout.
-6. Agent-skills-specific tests deleted; remaining tests updated and passing.
-7. `./sync-agents.sh` runs clean; generated tree contains expected skill set.
+1. `custom/skills/using-my-skills/` exists with merged SKILL.md + moved
+   `references/definition-of-done.md`.
+2. `custom/skills/using-agent-skills/` and `using-my-agents-skill/` removed.
+3. `AGENTS.md` + checkpoint reference only the new skill name.
+4. Generated tree rebuilt: `using-my-skills` present, old two absent.
+5. `tests/test-sync-agents-idempotent.sh` passes; QA report written.
 
 ## Current Status
 
-COMPLETED
+COMPLETED — all acceptance criteria met; QA report at
+`docs/superpowers/qa/2026-11-04-consolidate-using-my-skills.md`.
 
 ## Harness and Session Identifier
 
@@ -34,5 +36,6 @@ devin-cli, workspace /home/jeric/Workspace/my-agents, branch feat/light-demo-can
 
 ## Progress Log
 
-- 2026-11-04: Investigated pipeline; user chose: drop all 25 agent-skills,
-  keep superpowers/ui-ux mirrors, vendor using-agent-skills.
+- 2026-11-04: Prior task (remove agent-skills-fork) marked COMPLETED.
+- 2026-11-04: Consolidation started; user chose synchronous-default pipeline
+  with explicit-opt-in parallelism and absorbed discipline rules.
