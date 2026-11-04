@@ -3,8 +3,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FORK_DIR="$SCRIPT_DIR/superpowers-fork"
-UI_UX_FORK_DIR="$SCRIPT_DIR/ui-ux-fork"
+FORK_DIR="$SCRIPT_DIR/forks/superpowers-fork"
+UI_UX_FORK_DIR="$SCRIPT_DIR/forks/ui-ux-fork"
 SOURCE_DIR="$SCRIPT_DIR/superpowers-agents"
 SKILLS_DIR="$SOURCE_DIR/skills"
 SOURCE_RULES="$SCRIPT_DIR/shared/rules/global_rules.md"

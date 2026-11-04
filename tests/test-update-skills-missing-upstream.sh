@@ -45,8 +45,9 @@ git remote add origin "$UIUX_REMOTE"
 git push -u origin main >/dev/null
 
 cd "$WORKDIR"
-git clone "$SUPER_REMOTE" superpowers-fork >/dev/null
-cd superpowers-fork
+mkdir -p forks
+git clone "$SUPER_REMOTE" forks/superpowers-fork >/dev/null
+cd forks/superpowers-fork
 git checkout main >/dev/null
 # Ensure no upstream remote exists
 if git remote | grep -qx upstream; then
@@ -55,8 +56,8 @@ if git remote | grep -qx upstream; then
 fi
 
 cd "$WORKDIR"
-git clone "$UIUX_REMOTE" ui-ux-fork >/dev/null
-cd ui-ux-fork
+git clone "$UIUX_REMOTE" forks/ui-ux-fork >/dev/null
+cd forks/ui-ux-fork
 git checkout main >/dev/null
 if git remote | grep -qx upstream; then
   echo "Expected no upstream remote in test setup for ui-ux-fork" >&2

@@ -94,15 +94,16 @@ git branch -M main
 git remote add origin "$UIUX_REMOTE"
 git push -u origin main >/dev/null
 
-git clone "$SUPER_REMOTE" "$WORKDIR/superpowers-fork" >/dev/null
+mkdir -p "$WORKDIR/forks"
+git clone "$SUPER_REMOTE" "$WORKDIR/forks/superpowers-fork" >/dev/null
 (
-  cd "$WORKDIR/superpowers-fork"
+  cd "$WORKDIR/forks/superpowers-fork"
   git checkout main >/dev/null
 )
 
-git clone "$UIUX_REMOTE" "$WORKDIR/ui-ux-fork" >/dev/null
+git clone "$UIUX_REMOTE" "$WORKDIR/forks/ui-ux-fork" >/dev/null
 (
-  cd "$WORKDIR/ui-ux-fork"
+  cd "$WORKDIR/forks/ui-ux-fork"
   git checkout main >/dev/null
 )
 

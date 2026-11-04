@@ -3,8 +3,8 @@
 Local manager for Superpowers skills with:
 - a repo-local merged generated skills mirror at `superpowers-agents/skills`
 - optional local overrides at `custom/skills`
-- an upstream Superpowers mirror at `superpowers-fork`
-- an upstream `ui-ux-pro-max-skill` mirror at `ui-ux-fork` (only the `ui-ux-pro-max` skill is imported)
+- an upstream Superpowers mirror at `forks/superpowers-fork`
+- an upstream `ui-ux-pro-max-skill` mirror at `forks/ui-ux-fork` (only the `ui-ux-pro-max` skill is imported)
 - the canonical Universal AI Coding Agent Policy at `shared/policy/TASK_CONTINUITY.md`
 
 The scripts in this repo keep one generated skills source in this workspace, then expose it to both Codex and Claude Code.
@@ -21,8 +21,8 @@ The scripts in this repo keep one generated skills source in this workspace, the
 - `custom/skills/`: editable local custom/override skills copied into the generated mirror on setup/update
 - `shared/policy/TASK_CONTINUITY.md`: canonical Universal AI Coding Agent Policy (v2.0), linked to `~/.config/agent-workflow/TASK_CONTINUITY.md` on sync
 - `quota-recovery-controller.sh`: recovery controller for usage-limit interruptions (policy Section 12)
-- `superpowers-fork/`: upstream Superpowers mirror used as one update source
-- `ui-ux-fork/`: upstream `nextlevelbuilder/ui-ux-pro-max-skill` mirror; its skills live under `.claude/skills/` and only the names in `UI_UX_SKILL_ALLOWLIST` are imported
+- `forks/superpowers-fork/`: upstream Superpowers mirror used as one update source
+- `forks/ui-ux-fork/`: upstream `nextlevelbuilder/ui-ux-pro-max-skill` mirror; its skills live under `.claude/skills/` and only the names in `UI_UX_SKILL_ALLOWLIST` are imported
 - `sync-agents.sh`: the only maintenance entrypoint; clones or refreshes all upstream mirrors, rebuilds generated skills, refreshes runtime links, and links global rules
 
 ## Quick Start (Single Command)
@@ -39,8 +39,8 @@ This will:
 - update all upstream mirrors and reapply custom skills
 - update global rules links across configured CLIs
 - rebuild `superpowers-agents/skills` from:
-  1. `superpowers-fork/skills`
-  2. `ui-ux-fork/.claude/skills` for allowlisted, non-conflicting skill names only
+  1. `forks/superpowers-fork/skills`
+  2. `forks/ui-ux-fork/.claude/skills` for allowlisted, non-conflicting skill names only
   3. `custom/skills/*`
 - create/refresh `~/.agents -> <this-repo>/superpowers-agents`
 - create/refresh `~/.claude/skills -> <this-repo>/superpowers-agents/skills`
@@ -146,8 +146,8 @@ Then run:
 Your custom skill will be copied into `superpowers-agents/skills`, which is then exposed to both Codex and Claude Code.
 
 Merge precedence is:
-1. `superpowers-fork/skills`
-2. `ui-ux-fork/.claude/skills` for allowlisted, non-conflicting skill names only
+1. `forks/superpowers-fork/skills`
+2. `forks/ui-ux-fork/.claude/skills` for allowlisted, non-conflicting skill names only
 3. `custom/skills`
 
 If a skill exists in more than one source, the earlier source in this list wins unless you override it in `custom/skills`.
@@ -159,19 +159,19 @@ To import more skills from the `ui-ux-pro-max-skill` repo (it ships `ui-styling`
 From repo root:
 
 ```bash
-bash superpowers-fork/tests/claude-code/run-skill-tests.sh
+bash forks/superpowers-fork/tests/claude-code/run-skill-tests.sh
 ```
 
 Integration run:
 
 ```bash
-bash superpowers-fork/tests/claude-code/run-skill-tests.sh --integration
+bash forks/superpowers-fork/tests/claude-code/run-skill-tests.sh --integration
 ```
 
 Brainstorm harness test:
 
 ```bash
-cd superpowers-fork/tests/brainstorm-server && npm test
+cd forks/superpowers-fork/tests/brainstorm-server && npm test
 ```
 
 ## Notes
