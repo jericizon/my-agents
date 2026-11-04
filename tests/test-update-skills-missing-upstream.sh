@@ -7,8 +7,8 @@ trap 'rm -rf "$TEST_ROOT"' EXIT
 WORKDIR="$TEST_ROOT/work"
 SUPER_REMOTE="$TEST_ROOT/super.git"
 SUPER_SEED="$TEST_ROOT/super-seed"
-ADDY_REMOTE="$TEST_ROOT/addy.git"
-ADDY_SEED="$TEST_ROOT/addy-seed"
+UIUX_REMOTE="$TEST_ROOT/uiux.git"
+UIUX_SEED="$TEST_ROOT/uiux-seed"
 mkdir -p "$WORKDIR"
 mkdir -p "$TEST_ROOT/home"
 
@@ -28,20 +28,20 @@ git branch -M main
 git remote add origin "$SUPER_REMOTE"
 git push -u origin main >/dev/null
 
-git init --bare "$ADDY_REMOTE" >/dev/null
+git init --bare "$UIUX_REMOTE" >/dev/null
 
-git init "$ADDY_SEED" >/dev/null
-cd "$ADDY_SEED"
+git init "$UIUX_SEED" >/dev/null
+cd "$UIUX_SEED"
 git config user.name test
 git config user.email test@example.com
-mkdir -p skills/addy-skill
-cat > skills/addy-skill/SKILL.md <<'SKILL'
-# Addy
+mkdir -p .claude/skills/ui-ux-pro-max
+cat > .claude/skills/ui-ux-pro-max/SKILL.md <<'SKILL'
+# UI UX
 SKILL
-git add skills/addy-skill/SKILL.md
+git add .claude/skills/ui-ux-pro-max/SKILL.md
 git -c commit.gpgsign=false commit -m "seed" >/dev/null
 git branch -M main
-git remote add origin "$ADDY_REMOTE"
+git remote add origin "$UIUX_REMOTE"
 git push -u origin main >/dev/null
 
 cd "$WORKDIR"
@@ -55,20 +55,23 @@ if git remote | grep -qx upstream; then
 fi
 
 cd "$WORKDIR"
-git clone "$ADDY_REMOTE" agent-skills-fork >/dev/null
-cd agent-skills-fork
+git clone "$UIUX_REMOTE" ui-ux-fork >/dev/null
+cd ui-ux-fork
 git checkout main >/dev/null
 if git remote | grep -qx upstream; then
-  echo "Expected no upstream remote in test setup for agent-skills-fork" >&2
+  echo "Expected no upstream remote in test setup for ui-ux-fork" >&2
   exit 1
 fi
 
 cd "$WORKDIR"
 mkdir -p superpowers-agents custom/skills
-mkdir -p "$WORKDIR/shared/rules"
+mkdir -p "$WORKDIR/shared/rules" "$WORKDIR/shared/policy"
 cat > "$WORKDIR/shared/rules/global_rules.md" <<'RULES'
 # Global Rules
 RULES
+cat > "$WORKDIR/shared/policy/TASK_CONTINUITY.md" <<'POLICY'
+# Universal AI Coding Agent Policy
+POLICY
 cp /home/jeric/Workspace/my-agents/sync-agents.sh "$WORKDIR/sync-agents.sh"
 cp /home/jeric/Workspace/my-agents/README.md "$WORKDIR/README.md"
 cp /home/jeric/Workspace/my-agents/.gitignore "$WORKDIR/.gitignore"
@@ -80,6 +83,6 @@ if ! HOME="$TEST_ROOT/home" "$WORKDIR/sync-agents.sh" >"$TEST_ROOT/sync-agents.l
 fi
 
 test -f "$WORKDIR/superpowers-agents/skills/sample-skill/SKILL.md"
-test -f "$WORKDIR/superpowers-agents/skills/addy-skill/SKILL.md"
+test -f "$WORKDIR/superpowers-agents/skills/ui-ux-pro-max/SKILL.md"
 
 echo "PASS: update-skills handles missing upstream remote"

@@ -44,7 +44,7 @@ Route task-related follow-ups, clarifications, corrections, and scope changes th
 
 ## Ticket Execution Rules
 
-1. **Spec and plan per ticket.** The orchestrator writes a full spec and implementation plan for every ticket before delegation (`spec-driven-development` → `writing-plans`). Implementation sub-agents execute plans; they do not re-plan.
+1. **Spec and plan per ticket.** The orchestrator writes a full spec and implementation plan for every ticket before delegation (`brainstorming` → `writing-plans`). Implementation sub-agents execute plans; they do not re-plan.
 2. **Cheap hands, expensive heads.** Implementation sub-agents run on the lowest token-efficient model; the orchestrator and QA sub-agent run on the orchestrator-level model. Never spend frontier tokens on mechanical execution. Resolve tiers via the active harness (see the model-tier rule above) — Devin, Claude Code, Codex, or anything else.
 3. **Async with file-conflict avoidance.** Run tickets asynchronously (background sub-agents) for throughput, but two tickets that touch the same file must never run concurrently. The orchestrator maps file ownership per ticket at planning time, batches file-disjoint tickets to run in parallel, and queues tickets sharing files to run sequentially in dependency order.
 4. **Tests only for changed files.** Implementation and QA run tests scoped to the files each ticket changed (plus direct dependents when the test framework requires them). Never run the full suite by default; a full-suite run needs explicit justification or a user request.
@@ -63,7 +63,7 @@ Task arrives
     ├─ 2. Orchestrator invokes using-superpowers → discipline + instruction priority + 1% rule
     ├─ 3. Orchestrator invokes using-agent-skills → lifecycle phase + candidate skills
     ├─ 4. Clarity gate → is the instruction vague or ambiguous?
-    │   ├─ Yes → run interview-me first, then continue with the clarified intent
+    │   ├─ Yes → run brainstorming first, then continue with the clarified intent
     │   └─ No  → proceed with the stated task
     ├─ 5. Classify the task → BUGFIX / FEATURE / REFACTOR / TEST / REVIEW / SHIP / INVESTIGATE
     ├─ 6. Merge candidate lists → union of skills both meta-skills surface
@@ -83,16 +83,16 @@ Ticket loop (per batch, after step 9):
 
 For every task that changes source code, tests, scripts, configuration, schemas, build or deployment logic, or skill/runtime logic, the orchestrator must run this final gate after implementation and task-specific validation, immediately before completion or shipping. The gate is additive and non-prunable: task size, task type, file type, delegation count, prior QA, or an earlier review cannot bypass it.
 
-1. **Review:** Run `code-review-and-quality` against the clarified scope, acceptance criteria, constraints, security, regressions, and existing patterns.
-2. **Simplify:** Run `code-simplification` to address unnecessary complexity, duplication, unclear naming, and avoidable indirection without changing intended behavior.
+1. **Review:** Run `requesting-code-review` against the clarified scope, acceptance criteria, constraints, security, regressions, and existing patterns.
+2. **Simplify:** Address unnecessary complexity, duplication, unclear naming, and avoidable indirection without changing intended behavior.
 3. **Clean:** Check for and remove clearly safe, in-scope dead or unnecessary code, dependencies, branches, tests, and artifacts. Do not remove code based only on an assumption that it is unused.
 4. **Verify:** Run `verification-before-completion` on the post-cleanup state, including automated tests scoped to the changed files (full suite only with explicit justification) and required real-user or manual validation.
 
 The orchestrator records review findings, cleanup performed or deemed unnecessary, dead-code findings, verification commands and results, QA outcomes, limitations, and unresolved risks. If any stage fails, is skipped, unavailable, or unreported, do not claim completion; route required fixes through the implementation and existing QA loop, then repeat the gate. Documentation-only, explanation-only, and investigation-only tasks use task-appropriate validation but do not require this code-quality gate.
 
-## Clarity Gate: When to Run `interview-me`
+## Clarity Gate: When to Run `brainstorming`
 
-After invoking both meta-skills, perform a clarity check before classifying the task. Run `interview-me` first if any of the following are true:
+After invoking both meta-skills, perform a clarity check before classifying the task. Run `brainstorming` first if any of the following are true:
 
 - The request is missing **who**, **why**, what **success** looks like, or the binding **constraint**
 - The instruction uses a generic convention without specifics ("build me X", "make it faster", "clean it up")
@@ -100,13 +100,13 @@ After invoking both meta-skills, perform a clarity check before classifying the 
 - The user has not said which value they are optimizing when two reasonable ones are in tension
 - The user explicitly asks to be interviewed, grilled, or stress-tested
 
-If the instruction is self-contained and unambiguous ("rename this variable", "fix this typo", "run this specific command"), skip `interview-me` and proceed with classification.
+If the instruction is self-contained and unambiguous ("rename this variable", "fix this typo", "run this specific command"), skip `brainstorming` and proceed with classification.
 
 ## Reconciliation Rules
 
 1. **Always run both meta-skills first.** Never select skills from only one source. The discipline gate (using-superpowers) and the lifecycle router (using-agent-skills) cover different blind spots.
 
-2. **Clarity before classification.** The clarity gate is not optional. If the task is vague, run `interview-me` before the Task → Combined Skill Patterns table, using the clarified intent as the input for classification.
+2. **Clarity before classification.** The clarity gate is not optional. If the task is vague, run `brainstorming` before the Task → Combined Skill Patterns table, using the clarified intent as the input for classification.
 
 3. **Union, then prune.** Collect every skill either source surfaces, then remove any that does not earn its place for the current task. Smallest effective set wins — applying ten skills to a one-line fix is a failure, not thoroughness.
 
@@ -118,35 +118,36 @@ If the instruction is self-contained and unambiguous ("rename this variable", "f
 
 7. **User instructions outrank everything.** If the user (or CLAUDE.md / AGENTS.md) says skip a workflow, skip it. This bridge never overrides explicit user intent.
 
-8. **Prefer the more specific skill on conflict.** A domain skill (e.g. frontend-ui-engineering) beats a generic one when both cover the same step.
+8. **Prefer the more specific skill on conflict.** A domain skill (e.g. design-taste-frontend) beats a generic one when both cover the same step.
 
-9. **Always consult `ui-ux-pro-max` first on design work.** If the task involves *any* visual design, UI, or UX decision — pages, components, layout, color, typography, spacing, iconography, motion, accessibility, or data visualization — invoke `ui-ux-pro-max` before any other frontend skill. It is a searchable local database (84 styles, 192 palettes, 74 font pairings, 192 product types, 98 UX guidelines, 104 icons, 16 motion presets, 25 chart types across 22 stacks) that supplies the concrete design decisions the other skills then apply. It grounds the work in real reference data instead of invented defaults, so it is a research step, not an implementation step — it never replaces `frontend-ui-engineering` for building.
+9. **Always consult `ui-ux-pro-max` first on design work.** If the task involves *any* visual design, UI, or UX decision — pages, components, layout, color, typography, spacing, iconography, motion, accessibility, or data visualization — invoke `ui-ux-pro-max` before any other frontend skill. It is a searchable local database (84 styles, 192 palettes, 74 font pairings, 192 product types, 98 UX guidelines, 104 icons, 16 motion presets, 25 chart types across 22 stacks) that supplies the concrete design decisions the other skills then apply. It grounds the work in real reference data instead of invented defaults, so it is a research step, not an implementation step.
 
    Applies to: new UI, redesigns, design reviews, "make this look better", picking a palette or font pairing, choosing a chart type, component styling, design tokens/systems.
 
    Skip it only when the task touches no design decision at all (pure logic, config, backend, copy-only edits, or a mechanical change to existing markup).
 
-10. **Route visual frontend work through `design-taste-frontend`.** For any UI/UX task whose output must *look* intentional — landing pages, portfolios, marketing sites, or redesigns — include `design-taste-frontend` as the anti-slop gate that runs after `ui-ux-pro-max` supplies the reference data and before `frontend-ui-engineering` builds it. It sets design direction and enforces a pre-flight check against templated "AI-slop" output. Do NOT apply it to dashboards, data tables, admin panels, or multi-step product UI — it explicitly excludes those; use `ui-ux-pro-max` + `frontend-design` + `frontend-ui-engineering` alone there.
+10. **Route visual frontend work through `design-taste-frontend`.** For any UI/UX task whose output must *look* intentional — landing pages, portfolios, marketing sites, or redesigns — include `design-taste-frontend` as the anti-slop gate that runs after `ui-ux-pro-max` supplies the reference data and before implementation. It sets design direction and enforces a pre-flight check against templated "AI-slop" output. Do NOT apply it to dashboards, data tables, admin panels, or multi-step product UI — it explicitly excludes those; use `ui-ux-pro-max` alone there.
 
 ## Task → Combined Skill Patterns
 
 | Task type | Efficient combination (after pruning) |
 |-----------|----------------------------------------|
-| New feature | brainstorming → spec-driven-development → planning-and-task-breakdown → incremental-implementation → test-driven-development → code-review-and-quality |
-| Bug fix | systematic-debugging / debugging-and-error-recovery → test-driven-development → code-review-and-quality |
-| Refactor | code-simplification → test-driven-development → code-review-and-quality |
-| Vague idea | interview-me → idea-refine → spec-driven-development |
-| Security-sensitive | security-and-hardening → doubt-driven-development → code-review-and-quality |
-| Frontend / UI / UX design (landing pages, portfolios, marketing sites, redesigns) | brainstorming → **ui-ux-pro-max** (design data) → frontend-design → **design-taste-frontend** (anti-slop pre-flight gate) → frontend-ui-engineering → browser-testing-with-devtools |
-| Product UI (dashboards, tables, admin, app screens) | brainstorming → **ui-ux-pro-max** (design data) → frontend-design → frontend-ui-engineering → browser-testing-with-devtools |
-| Styling / visual polish only (palette, typography, spacing, motion, icons) | **ui-ux-pro-max** → frontend-ui-engineering |
-| Data visualization (charts, dashboards, graphs) | **ui-ux-pro-max** (chart type + palette) → dataviz → frontend-ui-engineering |
-| Design review / "make this look better" | **ui-ux-pro-max** (audit against guidelines) → design-taste-frontend → code-review-and-quality |
-| Browser / UI QA | comprehensive-qa-testing or browser-testing-with-devtools |
-| Ship / release | git-workflow-and-versioning → verification-before-completion → shipping-and-launch |
-| Multi-ticket batch | spec-driven-development → writing-plans → subagent-driven-development / dispatching-parallel-agents (async, file-disjoint batches) → code-review-and-quality |
+| New feature | brainstorming → writing-plans → executing-plans / subagent-driven-development → test-driven-development → verification-before-completion |
+| Bug fix | systematic-debugging → test-driven-development → verification-before-completion |
+| Refactor | writing-plans → executing-plans → test-driven-development → verification-before-completion |
+| Vague idea | brainstorming → writing-plans |
+| Frontend / UI / UX design (landing pages, portfolios, marketing sites, redesigns) | brainstorming → **ui-ux-pro-max** (design data) → **design-taste-frontend** (anti-slop pre-flight gate) → implementation → comprehensive-qa-testing |
+| Product UI (dashboards, tables, admin, app screens) | brainstorming → **ui-ux-pro-max** (design data) → implementation → comprehensive-qa-testing |
+| Styling / visual polish only (palette, typography, spacing, motion, icons) | **ui-ux-pro-max** |
+| Data visualization (charts, dashboards, graphs) | **ui-ux-pro-max** (chart type + palette) |
+| Design review / "make this look better" | **ui-ux-pro-max** (audit against guidelines) → design-taste-frontend |
+| Browser / UI QA | comprehensive-qa-testing or real-user-qa |
+| Live user-flow QA | real-user-qa |
+| Demo recording | client-demo-presentation or demo-the-updates |
+| Ship / release | finishing-a-development-branch → verification-before-completion |
+| Multi-ticket batch | writing-plans → subagent-driven-development / dispatching-parallel-agents (async, file-disjoint batches) → verification-before-completion |
 
-These are starting points. Always prune task-specific skills to what the specific task needs, but never prune the final quality gate for an in-scope code change. The clarity gate is applied before classification, so any task that is vague first runs `interview-me`, and the resulting clarified intent is used to classify the task and select the remaining skills.
+These are starting points. Always prune task-specific skills to what the specific task needs, but never prune the final quality gate for an in-scope code change. The clarity gate is applied before classification, so any task that is vague first runs `brainstorming`, and the resulting clarified intent is used to classify the task and select the remaining skills.
 
 ## Announce Format
 
@@ -166,8 +167,8 @@ Then invoke and follow each selected skill exactly, in order.
 - **Skipping the final quality gate.** Every code-changing plan must end with review, simplification, dead/unnecessary-code checks, and post-cleanup verification before claiming completion.
 - **Skipping verification.** Every combined plan must end with a task-appropriate verification skill before claiming completion.
 - **Designing without querying `ui-ux-pro-max`.** Picking colors, fonts, spacing, or chart types from memory produces generic output. Query the database first, then build.
-- **Treating `ui-ux-pro-max` as the builder.** It supplies design decisions; `frontend-ui-engineering` still writes the code.
-- **Skipping the clarity gate.** If the instruction is vague and you proceed directly to classification or implementation, you will build against unstated assumptions. Run `interview-me` first when the criteria in the Clarity Gate section are met.
+- **Treating `ui-ux-pro-max` as the builder.** It supplies design decisions; implementation still writes the code.
+- **Skipping the clarity gate.** If the instruction is vague and you proceed directly to classification or implementation, you will build against unstated assumptions. Run `brainstorming` first when the criteria in the Clarity Gate section are met.
 - **Running implementation on a frontier model.** Implementation sub-agents get the lowest token-efficient model; only the orchestrator and QA run on the orchestrator-level model.
 - **Running two tickets that touch the same file concurrently.** Async execution requires file-disjoint batching; overlapping tickets queue sequentially.
 - **Running the full test suite by default.** Scope tests to changed files unless a full run is explicitly justified.

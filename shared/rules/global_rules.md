@@ -119,21 +119,21 @@ Avoid creating unnecessary documentation.
 
 Automatically invoke the most relevant skill(s).
 
-| Task Type              | Skill                    |
-| ---------------------- | ------------------------ |
-| Bug Fix                | systematic-debugging     |
-| New Feature            | specification-writing    |
-| Refactor               | refactoring              |
-| API Design             | api-design               |
-| Database Work          | database-design          |
-| Performance Issues     | performance-optimization |
-| Security Review        | security-review          |
-| Architecture Decisions | architecture-review      |
-| Testing                | test-driven-development  |
-| Code Review            | code-review-and-quality  |
-| Validation             | Superpowers QA Workflow  |
-| Unclear Requirements   | brainstorming            |
-| Final Validation       | code-review-and-quality  |
+| Task Type              | Skill                                        |
+| ---------------------- | -------------------------------------------- |
+| Bug Fix                | systematic-debugging                          |
+| New Feature            | brainstorming → writing-plans                 |
+| Planning / Breakdown   | writing-plans                                  |
+| Implementation         | executing-plans / subagent-driven-development |
+| Refactor               | writing-plans → executing-plans               |
+| UI/UX or Visual Design | ui-ux-pro-max → design-taste-frontend         |
+| Testing                | test-driven-development                        |
+| Code Review            | requesting-code-review                         |
+| Live QA                | comprehensive-qa-testing / real-user-qa       |
+| Validation             | verification-before-completion                 |
+| Unclear Requirements   | brainstorming                                  |
+| Final Validation       | verification-before-completion                 |
+| Ship / Merge           | finishing-a-development-branch                 |
 
 Use only the skills relevant to the task.
 

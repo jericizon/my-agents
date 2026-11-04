@@ -4,7 +4,6 @@ Local manager for Superpowers skills with:
 - a repo-local merged generated skills mirror at `superpowers-agents/skills`
 - optional local overrides at `custom/skills`
 - an upstream Superpowers mirror at `superpowers-fork`
-- an upstream Addy Osmani `agent-skills` mirror at `agent-skills-fork`
 - an upstream `ui-ux-pro-max-skill` mirror at `ui-ux-fork` (only the `ui-ux-pro-max` skill is imported)
 - the canonical Universal AI Coding Agent Policy at `shared/policy/TASK_CONTINUITY.md`
 
@@ -23,7 +22,6 @@ The scripts in this repo keep one generated skills source in this workspace, the
 - `shared/policy/TASK_CONTINUITY.md`: canonical Universal AI Coding Agent Policy (v2.0), linked to `~/.config/agent-workflow/TASK_CONTINUITY.md` on sync
 - `quota-recovery-controller.sh`: recovery controller for usage-limit interruptions (policy Section 12)
 - `superpowers-fork/`: upstream Superpowers mirror used as one update source
-- `agent-skills-fork/`: upstream Addy Osmani `agent-skills` mirror used as a second update source
 - `ui-ux-fork/`: upstream `nextlevelbuilder/ui-ux-pro-max-skill` mirror; its skills live under `.claude/skills/` and only the names in `UI_UX_SKILL_ALLOWLIST` are imported
 - `sync-agents.sh`: the only maintenance entrypoint; clones or refreshes all upstream mirrors, rebuilds generated skills, refreshes runtime links, and links global rules
 
@@ -42,9 +40,8 @@ This will:
 - update global rules links across configured CLIs
 - rebuild `superpowers-agents/skills` from:
   1. `superpowers-fork/skills`
-  2. `agent-skills-fork/skills` for non-conflicting skill names only
-  3. `ui-ux-fork/.claude/skills` for allowlisted, non-conflicting skill names only
-  4. `custom/skills/*`
+  2. `ui-ux-fork/.claude/skills` for allowlisted, non-conflicting skill names only
+  3. `custom/skills/*`
 - create/refresh `~/.agents -> <this-repo>/superpowers-agents`
 - create/refresh `~/.claude/skills -> <this-repo>/superpowers-agents/skills`
 - fall back to copying into `~/.claude/skills` only if the Claude symlink cannot be created
@@ -150,11 +147,10 @@ Your custom skill will be copied into `superpowers-agents/skills`, which is then
 
 Merge precedence is:
 1. `superpowers-fork/skills`
-2. `agent-skills-fork/skills` for non-conflicting skill names only
-3. `ui-ux-fork/.claude/skills` for allowlisted, non-conflicting skill names only
-4. `custom/skills`
+2. `ui-ux-fork/.claude/skills` for allowlisted, non-conflicting skill names only
+3. `custom/skills`
 
-If a skill exists in more than one upstream mirror, the earlier source in this list wins unless you override it in `custom/skills`.
+If a skill exists in more than one source, the earlier source in this list wins unless you override it in `custom/skills`.
 
 To import more skills from the `ui-ux-pro-max-skill` repo (it ships `ui-styling`, `design`, `design-system`, `brand`, `slides`, `banner-design`), add their names to `UI_UX_SKILL_ALLOWLIST` in `sync-agents.sh`.
 
