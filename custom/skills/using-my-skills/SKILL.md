@@ -70,7 +70,7 @@ Classify the task, then pick the smallest pipeline that fits:
 
 ### Big-task pipeline (synchronous)
 
-1. Designate exactly one **orchestrator**. It clarifies ambiguity, writes the spec and per-ticket plans (`brainstorming` → `writing-plans`), maps file ownership, and maintains the durable checkpoint at `.superpowers/CURRENT_TASK.md` (see the task-continuity policy — update it after each milestone, when blocked, and before interruptions).
+1. Designate exactly one **orchestrator**. It clarifies ambiguity, writes the spec and per-ticket plans (`brainstorming` → `writing-plans`), maps file ownership, and maintains the durable checkpoint at `<project shared dir>/.superpowers/CURRENT_TASK.md` (see the task-continuity policy — update it after each milestone, when blocked, and before interruptions).
 2. For each ticket, **synchronously**: orchestrator hands a scoped subtask + acceptance criteria to **one implementation sub-agent** → dedicated **QA sub-agent** validates → orchestrator updates the checkpoint, then the next ticket starts. Sequential by default; no parallel fan-out.
 3. One **dedicated QA sub-agent** per workstream, kept across it. It invokes `real-user-qa`, gets clarified intent, acceptance criteria, diffs, risks, and environment prerequisites, and reports files/behavior/evidence — never a bare "passed".
 4. QA failure → route finding + evidence back to the implementation sub-agent, re-validate. Cap at three fix cycles per workstream, then stop and escalate with evidence.

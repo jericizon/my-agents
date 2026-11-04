@@ -82,13 +82,20 @@ Never silently assume the shared policy was loaded successfully.
 
 Use the existing project workflow and checkpoint conventions.
 
+Generated artifacts live in a shared workspace area, not inside the repository:
+
+* `WORKSPACE_ROOT` = `~/Workspace` if it exists, else `~/workspace` if it exists, else `~/Workspace` (create on demand).
+* `SHARED_ROOT` = `$WORKSPACE_ROOT/_shared`.
+* Project shared dir = `$SHARED_ROOT/` + the project path relative to `WORKSPACE_ROOT` (`~/Workspace/clients/adzeela` → `~/Workspace/_shared/clients/adzeela`). Paths already under `_shared/` resolve to themselves.
+* Projects outside `WORKSPACE_ROOT` keep using in-repo paths.
+
 Preferred task checkpoint:
 
-`.superpowers/CURRENT_TASK.md`
+`<project shared dir>/.superpowers/CURRENT_TASK.md`
 
 For multiple concurrent tasks, use separate task-specific checkpoints, for example:
 
-`.superpowers/tasks/<task-id>/CHECKPOINT.md`
+`<project shared dir>/.superpowers/tasks/<task-id>/CHECKPOINT.md`
 
 Before introducing new directories or files, inspect the repository's current conventions and reuse existing equivalents where appropriate.
 
@@ -105,7 +112,7 @@ At the start of every non-trivial task:
 3. Identify its supported global and repository instruction mechanisms.
 4. Load the shared policy using the appropriate supported mechanism.
 5. Load the repository's `AGENTS.md`, `CLAUDE.md`, equivalent agent instructions, and relevant development documentation.
-6. Read applicable `.superpowers/` instructions and existing task checkpoints.
+6. Read applicable `.superpowers/` instructions and existing task checkpoints (resolved under the project shared dir, per Layer C).
 7. Resolve conflicts before making material changes.
 8. Confirm that the current agent has enough context and permissions to proceed safely.
 
@@ -243,7 +250,7 @@ Do not delete checkpoints automatically after completion. Follow the project's r
 5. Prioritize findings by severity and impact.
 6. Do not modify production code unless implementation is requested or otherwise authorized.
 
-Follow the project's established `.superpowers/` instructions for task classification, planning, debugging, TDD, code review, and verification whenever those instructions exist.
+Follow the project's established `.superpowers/` instructions for task classification, planning, debugging, TDD, code review, and verification whenever those instructions exist (resolved under the project shared dir, per Layer C).
 
 # 7. Test-Driven Development and Quality Gates
 

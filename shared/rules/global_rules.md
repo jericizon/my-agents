@@ -45,11 +45,31 @@ STOP and ask questions.
 
 ---
 
+## SHARED WORKSPACE ARTIFACTS
+
+Agent-generated files that are not project source (specs, plans, QA reports, reviews, retrospectives, `.superpowers/` checkpoints and state, `tasks/` scratch, brainstorm sessions, QA evidence) live in a shared workspace area, not inside the repository.
+
+Resolution:
+
+* `WORKSPACE_ROOT` = `~/Workspace` if it exists, else `~/workspace` if it exists, else `~/Workspace` (create on demand).
+* `SHARED_ROOT` = `$WORKSPACE_ROOT/_shared` (created by `sync-agents.sh`; `mkdir -p` on first write).
+* Project shared dir = `$SHARED_ROOT/` + the project path relative to `WORKSPACE_ROOT`. Example: `~/Workspace/my-agents` → `~/Workspace/_shared/my-agents`; `~/Workspace/clients/adzeela` → `~/Workspace/_shared/clients/adzeela`.
+* Paths already under `_shared/` resolve to themselves.
+* Projects outside `WORKSPACE_ROOT` keep using in-repo paths.
+
+Rules:
+
+* Any path a skill, workflow, or document specifies under `docs/superpowers/`, `.superpowers/`, `tasks/`, or equivalent generated scratch resolves under the project shared dir with the same subpath.
+* When a script takes a project/output dir for artifact storage, pass the project shared dir.
+* Create directories lazily with `mkdir -p`. Never commit `_shared` content into a repository.
+
+---
+
 ## TASK CONTINUITY POLICY
 
 Canonical policy: `~/.config/agent-workflow/TASK_CONTINUITY.md` (Universal AI Coding Agent Policy v2.0 — cross-harness continuity, quota recovery, sub-agent orchestration, TDD, QA). Read it for any non-trivial task; it defines the full checkpoint schema and recovery procedures.
 
-* Maintain a durable checkpoint at `.superpowers/CURRENT_TASK.md` for every non-trivial, multi-step task. Update it after meaningful milestones, before interruptions, and when blocked. Never store secrets in checkpoints.
+* Maintain a durable checkpoint at `<project shared dir>/.superpowers/CURRENT_TASK.md` (see Shared Workspace Artifacts) for every non-trivial, multi-step task. Update it after meaningful milestones, before interruptions, and when blocked. Never store secrets in checkpoints.
 * Use explicit statuses: `PLANNING`, `IN_PROGRESS`, `WAITING_FOR_QUOTA`, `BLOCKED`, `READY_TO_RESUME`, `QA_IN_PROGRESS`, `NEEDS_USER_INPUT`, `COMPLETED`. Mark `COMPLETED` only when acceptance criteria and verification pass.
 * On usage limits, identify the actual cause (quota vs. billing vs. auth vs. rate limit), update the checkpoint, and record recovery state with `quota-recovery-controller.sh` (my-agents repo root). Never assume waiting fixes billing/auth/permission issues.
 * Verify harness capabilities before relying on them; do not assume session-resume flags, hooks, or quota APIs from one harness exist in another. Never invent undocumented mechanisms.
@@ -79,7 +99,7 @@ Before implementation:
 
 Use Superpowers documentation structure when applicable.
 
-Locations:
+Locations (under the project shared dir — see Shared Workspace Artifacts):
 
 ```text
 docs/superpowers/specifications/
@@ -209,9 +229,7 @@ When applicable:
 - Perform manual validation
 - Review logs and error handling
 
-Document findings in:
-
-docs/superpowers/qa/
+Document findings in `docs/superpowers/qa/` (under the project shared dir).
 
 Before completion verify:
 

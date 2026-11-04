@@ -100,4 +100,43 @@ set -e
 assert_state_field t1 OUTCOME manual
 assert_state_field t1 STATUS RESOLVED
 
+# 8. workspace-rooted project: state and default checkpoint land in _shared/<relpath>
+WS_HOME="$TEST_ROOT/ws-home"
+WS_PROJECT="$WS_HOME/Workspace/clients/acme"
+mkdir -p "$WS_PROJECT"
+HOME="$WS_HOME" "$CONTROLLER" record --harness devin --project "$WS_PROJECT" --task-id t6 \
+    --category quota --interval-seconds 1 >/dev/null
+test -f "$WS_HOME/Workspace/_shared/clients/acme/.superpowers/recovery/t6.state" \
+    || fail "state file missing under _shared/clients/acme"
+grep -q "CHECKPOINT_PATH=$WS_HOME/Workspace/_shared/clients/acme/.superpowers/CURRENT_TASK.md" \
+    "$WS_HOME/Workspace/_shared/clients/acme/.superpowers/recovery/t6.state" \
+    || fail "default checkpoint not under _shared"
+
+# 8b. lowercase ~/workspace is honored when ~/Workspace is absent
+LC_HOME="$TEST_ROOT/lc-home"
+LC_PROJECT="$LC_HOME/workspace/proj"
+mkdir -p "$LC_PROJECT"
+HOME="$LC_HOME" "$CONTROLLER" record --harness devin --project "$LC_PROJECT" --task-id t7 \
+    --category quota --interval-seconds 1 >/dev/null
+test -f "$LC_HOME/workspace/_shared/proj/.superpowers/recovery/t7.state" \
+    || fail "state file missing under lowercase workspace _shared"
+
+# 8c. a project already under _shared resolves to itself (no _shared/_shared)
+SELF="$WS_HOME/Workspace/_shared/selfproj"
+mkdir -p "$SELF"
+HOME="$WS_HOME" "$CONTROLLER" record --harness devin --project "$SELF" --task-id t8 \
+    --category quota --interval-seconds 1 >/dev/null
+test -f "$SELF/.superpowers/recovery/t8.state" \
+    || fail "self-shared project did not resolve to itself"
+test ! -d "$WS_HOME/Workspace/_shared/_shared" || fail "_shared/_shared must not be created"
+
+# 8d. no workspace root at all: in-repo fallback
+NOWS_HOME="$TEST_ROOT/nows-home"
+NOWS_PROJECT="$NOWS_HOME/proj"
+mkdir -p "$NOWS_PROJECT"
+HOME="$NOWS_HOME" "$CONTROLLER" record --harness devin --project "$NOWS_PROJECT" --task-id t9 \
+    --category quota --interval-seconds 1 >/dev/null
+test -f "$NOWS_PROJECT/.superpowers/recovery/t9.state" \
+    || fail "in-repo fallback broken when no workspace root exists"
+
 echo "PASS: quota-recovery-controller"

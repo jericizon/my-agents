@@ -126,5 +126,6 @@ test "$(readlink "$HOME_DIR/.codex/skills/sample-skill")" = "$WORKDIR/superpower
 test -L "$HOME_DIR/.gemini/skills/custom-skill"
 test "$(readlink "$HOME_DIR/.gemini/skills/custom-skill")" = "$WORKDIR/superpowers-agents/skills/custom-skill"
 test -L "$HOME_DIR/.gemini/skills/ui-ux-pro-max"
+test -d "$HOME_DIR/Workspace/_shared"
 
 echo "PASS: sync-agents is idempotent for tracked repo files"

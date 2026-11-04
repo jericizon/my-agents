@@ -11,6 +11,7 @@ This repository manages the agent skills catalog: upstream mirrors, local overri
 - `shared/rules/global_rules.md`, `shared/policy/TASK_CONTINUITY.md`: canonical global rules and the Universal AI Coding Agent Policy, symlinked into each harness config on sync.
 - `sync-agents.sh`: the only maintenance entrypoint (clone/refresh mirrors → rebuild generated tree → relink runtime paths, rules, policy).
 - `quota-recovery-controller.sh`, `tests/`, `docs/`, `tasks/`, `.superpowers/`.
+- `~/Workspace/_shared/<project>` (or `~/workspace/_shared/<project>`): central root for generated artifacts (specs, plans, QA reports, `.superpowers/` state). Created by `sync-agents.sh`; new generated content goes there — not into this repo — resolved per the Shared Workspace Artifacts contract in `shared/rules/global_rules.md`.
 
 Keep new skills in `custom/skills/<skill-name>/SKILL.md` and mirror the existing folder pattern.
 

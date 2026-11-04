@@ -5,7 +5,7 @@
 # with bounded retries, and resumes sessions only through verified harness
 # mechanisms and only with explicit confirmation.
 #
-# State: <project>/.superpowers/recovery/<task-id>.state  (KEY=value lines)
+# State: <project shared dir>/.superpowers/recovery/<task-id>.state  (KEY=value lines)
 # Exit codes: 0 ok | 1 usage | 2 unsupported/blocked | 3 duplicate suspected
 #             4 retries exhausted | 5 confirmation required
 
@@ -49,10 +49,34 @@ die() {
     exit 1
 }
 
+# Projects inside the workspace root write artifacts under
+# <workspace>/_shared/<project-relpath>/; outside it they stay in-repo.
+# Convention: see shared/rules/global_rules.md — "Shared Workspace Artifacts".
+shared_project_dir() {
+    local project root
+    project="$(cd "$1" 2>/dev/null && pwd -P)" || project="$1"
+
+    if [ -d "$HOME/Workspace" ]; then
+        root="$HOME/Workspace"
+    elif [ -d "$HOME/workspace" ]; then
+        root="$HOME/workspace"
+    else
+        printf '%s' "$project"
+        return
+    fi
+    root="$(cd "$root" && pwd -P)"
+
+    case "$project" in
+        "$root/_shared"|"$root/_shared"/*) printf '%s' "$project" ;;
+        "$root"/*) printf '%s/_shared/%s' "$root" "${project#"$root"/}" ;;
+        *) printf '%s' "$project" ;;
+    esac
+}
+
 state_path() {
     local project="$1"
     local task_id="$2"
-    printf '%s/.superpowers/recovery/%s.state' "$project" "$task_id"
+    printf '%s/.superpowers/recovery/%s.state' "$(shared_project_dir "$project")" "$task_id"
 }
 
 # Reads KEY=value lines without sourcing (values are user-supplied text).
@@ -176,7 +200,7 @@ cmd_record() {
     # Preserve fields not supplied on this record call.
     [ -n "$session_id" ] || session_id="$(state_get "$file" SESSION_ID)"
     [ -n "$checkpoint" ] || checkpoint="$(state_get "$file" CHECKPOINT_PATH)"
-    [ -n "$checkpoint" ] || checkpoint="$project/.superpowers/CURRENT_TASK.md"
+    [ -n "$checkpoint" ] || checkpoint="$(shared_project_dir "$project")/.superpowers/CURRENT_TASK.md"
 
     local now status
     now="$(date +%s)"

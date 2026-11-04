@@ -46,6 +46,7 @@ This will:
 - create/refresh `~/.claude/skills -> <this-repo>/superpowers-agents/skills`
 - fall back to copying into `~/.claude/skills` only if the Claude symlink cannot be created
 - per-skill-link every generated skill into `~/.codex/skills` and `~/.gemini/skills` (existing packs there are preserved; stale links pruned)
+- ensure `<workspace>/_shared` exists — the central directory for harness-generated artifacts (see below)
 
 Important:
 - `superpowers-agents/skills` is generated output and is gitignored in this repo
@@ -98,9 +99,19 @@ New device flow:
 
 Any future edits to `shared/rules/global_rules.md` immediately apply to all linked CLIs.
 
+## Shared Workspace Artifacts
+
+Files that harnesses generate but that are not project source — `docs/superpowers/` (specs, plans, QA, reviews, retrospectives), `.superpowers/` state (checkpoints, recovery, brainstorm sessions), `tasks/` scratch — live outside repositories under:
+
+```text
+<workspace>/_shared/<project path relative to workspace>/
+```
+
+`<workspace>` is `~/Workspace` if it exists, else `~/workspace`, else `~/Workspace` (created on sync). Examples: `~/Workspace/my-agents` → `~/Workspace/_shared/my-agents`, `~/Workspace/clients/adzeela` → `~/Workspace/_shared/clients/adzeela`. Projects outside the workspace root keep using in-repo paths. `sync-agents.sh` creates `_shared`; per-project dirs are created lazily on first write. Every configured harness learns the convention through the linked global rules. `_shared` content is never committed to a repository.
+
 ## Task Continuity and Quota Recovery
 
-The Universal AI Coding Agent Policy (v2.0) lives at `shared/policy/TASK_CONTINUITY.md` and is referenced from the global rules, so every configured harness loads it. It requires a durable checkpoint at `.superpowers/CURRENT_TASK.md` for every non-trivial, multi-step task (see that file for the template).
+The Universal AI Coding Agent Policy (v2.0) lives at `shared/policy/TASK_CONTINUITY.md` and is referenced from the global rules, so every configured harness loads it. It requires a durable checkpoint at `<project shared dir>/.superpowers/CURRENT_TASK.md` for every non-trivial, multi-step task (see that file for the template).
 
 When a harness hits a usage limit, record the failure and let the controller handle waiting and resumption:
 
@@ -126,7 +137,7 @@ Behavior and safety:
 - Categories `auth`, `billing`, `permission` are recorded as `BLOCKED`; `run` refuses them because waiting cannot fix them.
 - Retries are bounded (default 8, intervals double from 300s, capped at 3600s; override with `--max-retries` / `--interval-seconds`).
 - Resume commands use only mechanisms verified against the installed harness versions (see Appendix A of the policy). Unknown harnesses or categories stop without inventing anything.
-- State lives at `<project>/.superpowers/recovery/<task-id>.state`; it stores IDs and paths only, never secrets.
+- State lives at `<project shared dir>/.superpowers/recovery/<task-id>.state` (in-repo when the project is outside the workspace root); it stores IDs and paths only, never secrets.
 
 ## Add or Override a Skill
 

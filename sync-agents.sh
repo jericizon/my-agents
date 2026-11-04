@@ -105,6 +105,23 @@ install_policy() {
     install_symlink "$SOURCE_POLICY" "$target"
 }
 
+# Convention: <workspace>/_shared/<project-relpath> — see shared/rules/global_rules.md.
+ensure_shared_workspace() {
+    local ws_root
+
+    if [ -d "$HOME/Workspace" ]; then
+        ws_root="$HOME/Workspace"
+    elif [ -d "$HOME/workspace" ]; then
+        ws_root="$HOME/workspace"
+    else
+        ws_root="$HOME/Workspace"
+    fi
+
+    echo "Ensuring shared artifacts directory..."
+    mkdir -p "$ws_root/_shared"
+    echo "  $ws_root/_shared"
+}
+
 install_runtime_paths() {
     echo "Installing agent runtime paths..."
 
@@ -384,4 +401,7 @@ echo ""
 install_policy
 
 echo ""
-echo "Done. Skills, global rules, and task continuity policy are up to date."
+ensure_shared_workspace
+
+echo ""
+echo "Done. Skills, global rules, task continuity policy, and shared workspace are up to date."
