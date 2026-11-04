@@ -320,6 +320,11 @@ Before committing or pushing:
 
 If a task requires forbidden Git operations, instruct the user to perform them manually.
 
+## WORKSPACE & BRANCH POLICY
+
+* Never use git worktrees for isolation. When a skill suggests creating a worktree (e.g. `using-git-worktrees`), skip that step and work directly on the current branch.
+* Before implementation, check the current branch. If it is `main`, `master`, `develop`, `staging`, or another protected branch, suggest creating a feature branch first and wait for approval before proceeding. On any other branch, work on it as-is.
+
 ## COMMIT MESSAGE GUIDELINES
 
 When providing commit message suggestions:
