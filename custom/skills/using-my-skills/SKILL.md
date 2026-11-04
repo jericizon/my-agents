@@ -40,7 +40,7 @@ Task arrives
     ├── Executing a plan? ────────────────→ executing-plans
     ├── Need an isolated workspace? ──────→ using-git-worktrees
     ├── UI / visual design work? ────────→ ui-ux-pro-max (design data, always first)
-    │   └── Landing page / redesign? ────→ design-taste-frontend (anti-slop gate)
+    │   └── Redesign / upgrade existing UI? → redesign-existing-projects (audit-first)
     ├── Writing/running tests? ──────────→ test-driven-development
     ├── Something broke? ────────────────→ systematic-debugging
     ├── Reviewing code? ─────────────────→ requesting-code-review
@@ -109,7 +109,8 @@ Non-negotiable, across all skills:
 | New feature | brainstorming → writing-plans → executing-plans → test-driven-development → verification-before-completion |
 | Bug fix | systematic-debugging → test-driven-development → verification-before-completion |
 | Refactor | writing-plans → executing-plans → test-driven-development → verification-before-completion |
-| Frontend / landing page / redesign | brainstorming → ui-ux-pro-max → design-taste-frontend → implementation → comprehensive-qa-testing |
+| Frontend / landing page (new build) | brainstorming → ui-ux-pro-max → implementation → comprehensive-qa-testing |
+| Redesign / upgrade existing UI | brainstorming → ui-ux-pro-max → redesign-existing-projects → implementation → comprehensive-qa-testing |
 | Product UI (dashboards, admin, app screens) | brainstorming → ui-ux-pro-max → implementation → comprehensive-qa-testing |
 | Styling / visual polish / charts | ui-ux-pro-max |
 | Browser / live QA | comprehensive-qa-testing or real-user-qa |
