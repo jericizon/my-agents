@@ -24,7 +24,7 @@ Do not use when:
 
 - the request is only to write or run unit/integration tests (that's regular TDD)
 - the app is not running and the user only wants startup help
-- the user only wants a demo/walkthrough video — use `client-demo-presentation`
+- the user only wants a demo/walkthrough video → use `using-my-presenter`
 
 ## Core Rules
 

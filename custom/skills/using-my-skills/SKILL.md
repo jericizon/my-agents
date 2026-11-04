@@ -46,8 +46,7 @@ Task arrives
     ├── Reviewing code? ─────────────────→ requesting-code-review
     │   └── Processing feedback? ───────→ receiving-code-review
     ├── Live app / real-user QA? ────────→ using-my-qa
-    ├── Demo recording? ─────────────────→ client-demo-presentation
-    │   └── Per-feature demo set? ──────→ demo-the-updates
+    ├── Demo recording? ─────────────────→ using-my-presenter
     ├── About to claim "done"? ──────────→ verification-before-completion
     ├── Ready to merge/integrate? ───────→ finishing-a-development-branch
     ├── Writing or editing a skill? ─────→ writing-skills
@@ -113,7 +112,7 @@ Non-negotiable, across all skills:
 | Product UI (dashboards, admin, app screens) | brainstorming → ui-ux-pro-max → implementation → using-my-qa |
 | Styling / visual polish / charts | ui-ux-pro-max |
 | Browser / live QA | using-my-qa |
-| Demo recording | client-demo-presentation or demo-the-updates |
+| Demo recording | using-my-presenter |
 | Ship / release | finishing-a-development-branch → verification-before-completion |
 
 ## Red Flags

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Reusable Playwright/FFmpeg tooling setup for the client-demo-presentation skill.
+# Reusable Playwright/FFmpeg tooling setup for the using-my-presenter skill.
 # This avoids re-downloading Chromium for every demo by keeping tooling in a persistent
 # cache directory. Safe to run on every invocation — it skips installation if the cache
 # is already valid.
