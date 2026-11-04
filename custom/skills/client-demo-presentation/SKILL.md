@@ -18,7 +18,7 @@ voiceover track in the final video.
 
 This is **presentation, not QA**. It does not fix bugs or write tests — it tells the story
 of how to use a feature for a non-technical audience. If the feature is broken or needs
-validation/fixing first, use `comprehensive-qa-testing` instead.
+validation/fixing first, use `using-my-qa` instead.
 
 Core principle: a plain Cypress / Playwright-MCP capture records only the page viewport
 (no OS cursor), so it looks like a "preview" with values changing on their own. To get a
@@ -35,7 +35,7 @@ Use this skill when the user wants any of:
 - a demo deliverable with screenshots + one full video
 
 Do NOT use this skill when:
-- the user wants validation/QA, bug fixing, or end-to-end test authoring → use `comprehensive-qa-testing`
+- the user wants validation/QA, bug fixing, or end-to-end test authoring → use `using-my-qa`
 - the app is not running and the user only wants startup help
 - the user only wants static screenshots with no walkthrough
 
@@ -99,7 +99,7 @@ Do NOT use this skill when:
   final `.mp4` to `$JHECKBOT_MEDIA_DIR/capture.mp4` so the video renders inline in the chat
   reply. This applies to any project — the env var is the contract, not the project.
 - This skill does not fix product bugs. If the flow is blocked by a real defect, stop and
-  report `BLOCKED`; hand off to `comprehensive-qa-testing` for fixing.
+  report `BLOCKED`; hand off to `using-my-qa` for fixing.
 
 ## Workflow (multi-phase sub-agents)
 
@@ -315,7 +315,7 @@ Report `BLOCKED` (and do not fabricate a video) when:
 - the app is not running or not reachable
 - the feature/route cannot be located in the repo
 - required auth or demo credentials are unavailable
-- the flow hits a real product bug (hand off to `comprehensive-qa-testing` for fixing)
+- the flow hits a real product bug (hand off to `using-my-qa` for fixing)
 - voiceover was requested but the selected local TTS engine, Piper model/config, or `ffmpeg-static` is unavailable
 - no browser tooling can be installed (no Playwright, no network)
 

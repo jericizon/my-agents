@@ -40,13 +40,12 @@ Task arrives
     ├── Executing a plan? ────────────────→ executing-plans
     ├── Need an isolated workspace? ──────→ using-git-worktrees
     ├── UI / visual design work? ────────→ ui-ux-pro-max (design data, always first)
-    │   └── Redesign / upgrade existing UI? → redesign-existing-projects (audit-first)
+    │   └── Redesign / upgrade existing UI? → using-my-designer (audit-first)
     ├── Writing/running tests? ──────────→ test-driven-development
     ├── Something broke? ────────────────→ systematic-debugging
     ├── Reviewing code? ─────────────────→ requesting-code-review
     │   └── Processing feedback? ───────→ receiving-code-review
-    ├── Live app / real-user QA? ────────→ real-user-qa
-    │   └── Real-browser E2E QA? ───────→ comprehensive-qa-testing
+    ├── Live app / real-user QA? ────────→ using-my-qa
     ├── Demo recording? ─────────────────→ client-demo-presentation
     │   └── Per-feature demo set? ──────→ demo-the-updates
     ├── About to claim "done"? ──────────→ verification-before-completion
@@ -72,7 +71,7 @@ Classify the task, then pick the smallest pipeline that fits:
 
 1. Designate exactly one **orchestrator**. It clarifies ambiguity, writes the spec and per-ticket plans (`brainstorming` → `writing-plans`), maps file ownership, and maintains the durable checkpoint at `<project shared dir>/.superpowers/CURRENT_TASK.md` (see the task-continuity policy — update it after each milestone, when blocked, and before interruptions).
 2. For each ticket, **synchronously**: orchestrator hands a scoped subtask + acceptance criteria to **one implementation sub-agent** → dedicated **QA sub-agent** validates → orchestrator updates the checkpoint, then the next ticket starts. Sequential by default; no parallel fan-out.
-3. One **dedicated QA sub-agent** per workstream, kept across it. It invokes `real-user-qa`, gets clarified intent, acceptance criteria, diffs, risks, and environment prerequisites, and reports files/behavior/evidence — never a bare "passed".
+3. One **dedicated QA sub-agent** per workstream, kept across it. It invokes `using-my-qa`, gets clarified intent, acceptance criteria, diffs, risks, and environment prerequisites, and reports files/behavior/evidence — never a bare "passed".
 4. QA failure → route finding + evidence back to the implementation sub-agent, re-validate. Cap at three fix cycles per workstream, then stop and escalate with evidence.
 5. **Fast mode** (explicit user request only): multiple implementation sub-agents may run in parallel, but two tickets touching the same file never run concurrently.
 
@@ -109,11 +108,11 @@ Non-negotiable, across all skills:
 | New feature | brainstorming → writing-plans → executing-plans → test-driven-development → verification-before-completion |
 | Bug fix | systematic-debugging → test-driven-development → verification-before-completion |
 | Refactor | writing-plans → executing-plans → test-driven-development → verification-before-completion |
-| Frontend / landing page (new build) | brainstorming → ui-ux-pro-max → implementation → comprehensive-qa-testing |
-| Redesign / upgrade existing UI | brainstorming → ui-ux-pro-max → redesign-existing-projects → implementation → comprehensive-qa-testing |
-| Product UI (dashboards, admin, app screens) | brainstorming → ui-ux-pro-max → implementation → comprehensive-qa-testing |
+| Frontend / landing page (new build) | brainstorming → ui-ux-pro-max → implementation → using-my-qa |
+| Redesign / upgrade existing UI | brainstorming → ui-ux-pro-max → using-my-designer → implementation → using-my-qa |
+| Product UI (dashboards, admin, app screens) | brainstorming → ui-ux-pro-max → implementation → using-my-qa |
 | Styling / visual polish / charts | ui-ux-pro-max |
-| Browser / live QA | comprehensive-qa-testing or real-user-qa |
+| Browser / live QA | using-my-qa |
 | Demo recording | client-demo-presentation or demo-the-updates |
 | Ship / release | finishing-a-development-branch → verification-before-completion |
 

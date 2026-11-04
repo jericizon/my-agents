@@ -146,10 +146,10 @@ Automatically invoke the most relevant skill(s).
 | Planning / Breakdown   | writing-plans                                  |
 | Implementation         | executing-plans / subagent-driven-development |
 | Refactor               | writing-plans → executing-plans               |
-| UI/UX or Visual Design | ui-ux-pro-max; + redesign-existing-projects for existing-UI redesigns |
+| UI/UX or Visual Design | ui-ux-pro-max; + using-my-designer for existing-UI redesigns |
 | Testing                | test-driven-development                        |
 | Code Review            | requesting-code-review                         |
-| Live QA                | comprehensive-qa-testing / real-user-qa       |
+| Live QA                | using-my-qa                                        |
 | Validation             | verification-before-completion                 |
 | Unclear Requirements   | brainstorming                                  |
 | Final Validation       | verification-before-completion                 |

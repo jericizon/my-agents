@@ -29,7 +29,7 @@ Use this skill when the user wants any of:
 
 Do NOT use this skill when:
 - the user wants a single-feature demo with no pre-verification → use `client-demo-presentation` directly
-- the user wants QA/testing only with no demo video → use `comprehensive-qa-testing` or `real-user-qa`
+- the user wants QA/testing only with no demo video → use `using-my-qa`
 - the user wants bug fixing only with no recording → use `systematic-debugging`
 
 ## Core Rules
