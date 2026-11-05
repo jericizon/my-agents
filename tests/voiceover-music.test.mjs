@@ -6,7 +6,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import {
-  AMBIENT_BED_EXPR,
+  BUNDLED_BED_EXPR,
   audioDurationMs,
   buildAudioMixFilter,
   buildMuxArgs,
@@ -162,7 +162,7 @@ test('music requires a duration so fades/trim can be placed', () => {
 });
 
 test('ambient bed expression is a soft multi-partial pad', () => {
-  assert.ok(typeof AMBIENT_BED_EXPR === 'string' && AMBIENT_BED_EXPR.includes('sin(2*PI*'));
+  assert.ok(typeof BUNDLED_BED_EXPR === 'string' && BUNDLED_BED_EXPR.includes('sin(2*PI*'));
 });
 
 // ── real ffmpeg: ducking + fades + duration ──────────────────────────────────

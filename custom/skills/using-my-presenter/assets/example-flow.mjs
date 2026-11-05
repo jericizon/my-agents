@@ -26,6 +26,8 @@
  *                                control on the page, not only the ones the flow acts on
  *   h.type(locator, text)       realistic per-key typing
  *   h.shot(label)               capture a numbered milestone screenshot (NNN_label.png)
+ *                               + a shots.json entry with the live caption — make-docs.mjs
+ *                               turns these into a .docx/.pdf walkthrough document
  *   h.sleep(ms)                 pause so viewers can read the screen
  *   page                        the Playwright Page (full API available)
  *
@@ -36,6 +38,8 @@
  * - Narrate EVERY step with h.narrate so a non-technical client can follow along — narrate
  *   is the caption + the spoken line in one. Use h.caption only for visual labels that
  *   should NOT be read aloud. Keep narration lines concise and complete.
+ *   Lead with what the user ACCOMPLISHES in the product's own vocabulary (pull terms
+ *   from PRODUCT_BRIEF.md): "the order is ready to send", not "a modal opens".
  *   Prefer plain string literals for narrate/explain text: literal lines are
  *   pre-synthesized before the camera rolls, so spoken lines land back-to-back.
  *   Dynamic text still works but generates on the spot and can add a pause.
@@ -100,7 +104,9 @@ export default async function runFlow(page, h) {
   // 5. Submit
   await h.narrate('Step 3 · Click "Sign in"');
   await h.glideClick(page.getByRole('button', { name: /log ?in|sign ?in/i }));
-  await page.waitForLoadState('networkidle');
+  // Bound every wait — an unbounded networkidle starves on apps with
+  // polling/websockets and freezes the take on an already-loaded page.
+  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
   await h.sleep(800);
 
   // 6. Prove the result

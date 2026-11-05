@@ -44,6 +44,9 @@
  *   --music <mode>   Background music: 'none' to disable, a file path for a
  *                    custom bed, or 'auto' (default with --voiceover) for the
  *                    bundled bed. (env DEMO_MUSIC)
+ *   --screens-only   Capture screenshots + shots.json only — no video recording
+ *                    or compositing (docs-generation mode; env DEMO_SCREENS_ONLY).
+ *                    Disregards --voiceover: there is no video to mux audio into.
  *
  * THE FLOW FILE (see example-flow.mjs next to this file):
  *   export default async function runFlow(page, h) { ... }
@@ -55,7 +58,9 @@
  *
  * SCREENSHOTS
  *   Call h.shot('open') / h.shot('login-form') at each milestone. Files are written as
- *   numbered PNGs into <out>/screenshots/ (001_open.png, 002_login-form.png, ...).
+ *   numbered PNGs into <out>/screenshots/ (001_open.png, 002_login-form.png, ...),
+ *   plus a <out>/shots.json sidecar ({n, file, label, caption, url}) so downstream
+ *   tooling (make-docs.mjs) can caption each figure with the live subtitle text.
  */
 import { createRequire } from 'module';
 import { execFileSync } from 'child_process';
@@ -116,6 +121,9 @@ const CONFIG = {
   FPS: Math.max(1, Math.round(Number(args.fps || process.env.DEMO_FPS) || 60)),
   // macOS-style browser chrome mockup composited above the recording in post.
   CHROME: !(args['no-chrome'] || /^(1|true|yes|on)$/i.test(String(process.env.DEMO_NO_CHROME ?? '').trim())),
+  // Docs mode: capture milestone screenshots + shots.json without any video
+  // pipeline (no recordVideo, no chrome mockup, no ffmpeg post-processing).
+  SCREENS_ONLY: !!(args['screens-only'] || /^(1|true|yes|on)$/i.test(String(process.env.DEMO_SCREENS_ONLY ?? '').trim())),
 };
 
 // Layout of the composited .mp4 canvas: the recording floats as a browser window
@@ -401,6 +409,12 @@ async function loadFlow(flowPath) {
 
 // ── Engine ────────────────────────────────────────────────────────────────────
 (async () => {
+  // Screens-only runs produce no video, so there is nothing to mux voiceover
+  // into — disregard the request (h.narrate still emits captions for shots.json).
+  if (CONFIG.SCREENS_ONLY && CONFIG.VOICEOVER) {
+    console.warn('[recorder] --screens-only produces no video — disregarding the voiceover request.');
+    CONFIG.VOICEOVER = false;
+  }
   // VoiceStudio is the only narration engine. When it is unreachable (or ffmpeg
   // is missing) the voiceover request is disregarded: the clip records silently.
   if (CONFIG.VOICEOVER) {
@@ -434,6 +448,13 @@ async function loadFlow(flowPath) {
   // recorded timeline as dead air between spoken lines.
   const VO_GAP_MS = Math.max(0, Number(process.env.DEMO_VO_GAP_MS) || 350);
   const VO_TAIL_MS = Math.max(0, Number(process.env.DEMO_VO_TAIL_MS) || 400);
+  // Pre-roll bound: how long to wait for the prefetch queue to finish
+  // synthesizing before the camera rolls. Off-camera delay is invisible in the
+  // video; an on-camera TTS stall is not. 0 = only ensure the first line.
+  const VO_PREROLL_MS = Math.max(0, Number(process.env.DEMO_VO_PREROLL_MS) || 120000);
+  // networkidle can starve on apps with polling/websockets/analytics — bound it
+  // so an already-loaded page never stalls (or kills) the take.
+  const NAV_TIMEOUT_MS = Math.max(1000, Number(process.env.DEMO_NAV_TIMEOUT_MS) || 15000);
   const voiceoverDir = path.join(CONFIG.OUT_DIR, '.voiceover');
   const narrationLines = (() => {
     if (!CONFIG.VOICEOVER || !CONFIG.FLOW) return [];
@@ -474,9 +495,10 @@ async function loadFlow(flowPath) {
   const browser = await chromium.launch({ headless: CONFIG.HEADLESS });
 
   // Render the mockup PNGs with the same Chromium (clean contexts, no overlay scripts).
+  // Skipped in screens-only mode — they exist solely for video compositing.
   let backdropPng = null;
   let framePng = null;
-  if (CONFIG.CHROME) {
+  if (CONFIG.CHROME && !CONFIG.SCREENS_ONLY) {
     const winW = CONFIG.VIEWPORT.width;
     const winH = CHROME_BAR_PX + CONFIG.VIEWPORT.height;
     const renderPng = async (html, file, width, height, transparent = false) => {
@@ -492,13 +514,34 @@ async function loadFlow(flowPath) {
     await renderPng(frameDoc(winW, winH, CHROME_BAR_PX, WINDOW_RADIUS), framePng, winW, winH, true);
   }
 
-  // The camera rolls on context open — wait for the first spoken line to be
-  // generated so it starts on-camera instead of after an on-camera stall.
-  if (narrationLines.length) await narrator.ensure(narrationLines[0]);
+  // The camera rolls on context open — hold until the literal narration lines
+  // are on disk (bounded). Synthesis during setup is invisible in the video; a
+  // mid-recording TTS round-trip lands as dead air, so drain the queue first.
+  if (narrationLines.length && VO_PREROLL_MS > 0) {
+    const t0 = Date.now();
+    const ticker = setInterval(() => {
+      const s = narrator.stats();
+      console.log(`[recorder] pre-synthesizing narration… ${s.done}/${s.total}`);
+    }, 10000);
+    let timer;
+    const drained = await Promise.race([
+      narrator.drain().then(() => true),
+      new Promise((r) => { timer = setTimeout(() => r(false), VO_PREROLL_MS); }),
+    ]);
+    clearTimeout(timer);
+    clearInterval(ticker);
+    if (drained) {
+      console.log(`[recorder] narration ready — ${narrationLines.length} line(s) synthesized in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+    } else {
+      console.warn(`[recorder] narration pre-roll hit the ${VO_PREROLL_MS}ms bound — remaining lines will synthesize on-camera`);
+    }
+  } else if (narrationLines.length) {
+    await narrator.ensure(narrationLines[0]);
+  }
 
   const context = await browser.newContext({
     viewport: CONFIG.VIEWPORT,
-    recordVideo: { dir: videoDir, size: CONFIG.VIEWPORT },
+    ...(CONFIG.SCREENS_ONLY ? {} : { recordVideo: { dir: videoDir, size: CONFIG.VIEWPORT } }),
   });
   await context.addInitScript(overlayInit, { lanePx: IN_PAGE_LANE_PX, fontPx: CAPTION_FONT_PX });
   const page = await context.newPage();
@@ -506,20 +549,27 @@ async function loadFlow(flowPath) {
   const toUrl = (p) => (/^https?:\/\//.test(p) ? p : CONFIG.BASE.replace(/\/$/, '') + (p.startsWith('/') ? p : `/${p}`));
   const recordingStartedAt = process.hrtime.bigint();
   const captionTimeline = [];
+  // Live caption state — mirrored into shots.json entries so a generated doc can
+  // caption each figure with the subtitle that was on screen when it was taken.
+  let currentCaption = '';
+  const shotsLog = [];
   const elapsedMs = () => Number(process.hrtime.bigint() - recordingStartedAt) / 1e6;
   // Audio-driven narration: h.narrate() measures the REAL duration, shows the
   // caption, and holds the scene until the audio has finished — no estimated
   // reading times, no tempo-fitting at mux. Gated helpers additionally wait so
   // nothing advances mid-narration.
-  const setCaptionText = (text) => page.evaluate((x) => {
-    const cap = document.getElementById('__demoCaptionText');
-    if (cap) { cap.textContent = x; cap.style.opacity = x ? '1' : '0'; }
-  }, text).catch(() => {});
+  const setCaptionText = (text) => {
+    currentCaption = String(text ?? '');
+    return page.evaluate((x) => {
+      const cap = document.getElementById('__demoCaptionText');
+      if (cap) { cap.textContent = x; cap.style.opacity = x ? '1' : '0'; }
+    }, text).catch(() => {});
+  };
   captionSink = async (text, at) => { captionTimeline.push({ text, at }); await setCaptionText(text); };
   // URL timeline for the chrome pill: poll page.url() so both full navigations and
   // SPA route changes (pushState) are captured with wall-clock timing.
   const urlTimeline = [];
-  const urlPoller = CONFIG.CHROME ? setInterval(() => {
+  const urlPoller = (CONFIG.CHROME && !CONFIG.SCREENS_ONLY) ? setInterval(() => {
     try {
       const raw = page.url();
       const url = raw === 'about:blank' ? '' : raw;
@@ -575,7 +625,16 @@ async function loadFlow(flowPath) {
     goto: async (p = '/', opts = {}) => {
       await narrator.waitForNarration(); // narration finishes before navigation
       await hideHighlight(); // never carry the spotlight across a navigation
-      return page.goto(toUrl(p), { waitUntil: 'networkidle', ...opts });
+      try {
+        return await page.goto(toUrl(p), { waitUntil: 'networkidle', timeout: NAV_TIMEOUT_MS, ...opts });
+      } catch (e) {
+        // A networkidle timeout means the page loaded but kept network activity
+        // (polling/websockets) — continue with the loaded page rather than
+        // freezing the take. Other navigation failures still abort the clip.
+        if (e?.name !== 'TimeoutError' || (opts.waitUntil && opts.waitUntil !== 'networkidle')) throw e;
+        console.warn(`[recorder] networkidle not reached within ${NAV_TIMEOUT_MS}ms — continuing with the loaded page`);
+        return null;
+      }
     },
     // Visual subtitle only — NOT spoken in voiceover mode; use h.narrate() for
     // lines that must be read aloud.
@@ -630,11 +689,20 @@ async function loadFlow(flowPath) {
     },
     type: (loc, text) => loc.pressSequentially(text, { delay: 75 }),
     // Capture a numbered milestone screenshot into <out>/screenshots/NNN_label.png
+    // and log it to shots.json (written at run end) with the live caption + URL.
     shot: async (label) => {
       shotN += 1;
       const id = String(shotN).padStart(3, '0');
-      const file = path.join(shotsDir, `${id}_${slug(label)}.png`);
-      await page.screenshot({ path: file }).catch((e) => console.warn('[recorder] shot failed', e.message));
+      const name = `${id}_${slug(label)}.png`;
+      const file = path.join(shotsDir, name);
+      const ok = await page.screenshot({ path: file })
+        .then(() => true)
+        .catch((e) => { console.warn('[recorder] shot failed', e.message); return false; });
+      if (ok) {
+        let url = null;
+        try { url = page.url(); } catch { /* page may be mid-navigation */ }
+        shotsLog.push({ n: shotN, file: `screenshots/${name}`, label: String(label ?? ''), caption: currentCaption || null, url });
+      }
       console.log('SHOT=' + file);
       return file;
     },
@@ -647,6 +715,13 @@ async function loadFlow(flowPath) {
   if (narrator.segments.length) await sleep(VO_TAIL_MS); // safety tail keeps the last word inside the capture
   narrator.stop(); // abandon leftover prefetch — in-flight TTS must not outlive the run
   if (urlPoller) clearInterval(urlPoller);
+
+  // shots.json rides alongside screenshots/ in every mode — make-docs.mjs reads
+  // it for figure captions; written even when the flow errored (partial capture).
+  const shotsJsonPath = path.join(CONFIG.OUT_DIR, 'shots.json');
+  try {
+    writeFileSync(shotsJsonPath, JSON.stringify({ base: CONFIG.BASE, capturedAt: new Date().toISOString(), shots: shotsLog }, null, 2));
+  } catch (e) { console.warn('[recorder] shots.json write failed:', e.message); }
 
   const video = page.video();
   await context.close(); // flushes the .webm
@@ -789,6 +864,7 @@ async function loadFlow(flowPath) {
   }
   console.log('WEBM=' + (webmOutput || 'NONE'));
   console.log('SHOTS=' + shotN);
+  console.log('SHOTS_JSON=' + shotsJsonPath);
   console.log('OUTPUT=' + (out || 'NONE'));
   console.log('FILES=' + readdirSync(CONFIG.OUT_DIR).join(','));
   if (err || voiceoverError) process.exit(1);

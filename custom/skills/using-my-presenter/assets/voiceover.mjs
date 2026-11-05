@@ -296,15 +296,22 @@ export async function createTtsAudio(engine, text, outputPath, { fetchImpl = fet
   return { file: outputPath, durationMs: audioDurationMs(outputPath, { ffmpeg, execFile }) };
 }
 
-// Timing gate driven by MEASURED audio duration — never by estimates. The scene
-// may only advance once the active narration has actually finished (+ gap).
+// Two-tier timing gate driven by MEASURED audio duration — never by estimates.
+// `waitSpeech` releases the instant the active narration's audio ends — cursor,
+// spotlight, navigation, and captions may move then. `waitBeat` additionally
+// holds the inter-line breath gap; only the next SPOKEN line waits on it, so
+// visual mechanics overlap the breath instead of freezing through it.
 export function createNarrationGate({ now, sleep, gapMs = SEGMENT_END_GAP_MS } = {}) {
   let endsAt = -Infinity; // now() timestamp the active narration ends; -inf = idle
+  const hold = (extra) => async () => {
+    const waitMs = endsAt + extra - now();
+    if (waitMs > 0) await sleep(waitMs);
+  };
+  const waitBeat = hold(gapMs);
   return {
-    async wait() {
-      const waitMs = endsAt + gapMs - now();
-      if (waitMs > 0) await sleep(waitMs);
-    },
+    waitSpeech: hold(0),
+    waitBeat,
+    wait: waitBeat, // back-compat alias: the old wait() held end + gap
     // Mark narration as started at `at`; it will play for `durationMs` (measured).
     start({ at, durationMs }) {
       endsAt = at + durationMs;
@@ -344,6 +351,7 @@ export function createNarrator({
   const demand = [];
   const ahead = [];
   let pumping = null;
+  let inFlight = null; // entry currently inside synthesize()
 
   const synthesize = async (text) => {
     const file = path.join(outputDir, `${String(++n).padStart(3, '0')}.wav`);
@@ -369,7 +377,9 @@ export function createNarrator({
       const e = demand.length ? demand.shift() : ahead.shift();
       if (!e) break;
       if (e.done) continue; // already resolved while queued (promotion/stop)
+      inFlight = e;
       const seg = await synthesize(e.text);
+      inFlight = null;
       if (!e.done) { e.done = true; e.resolve(seg); }
     }
     pumping = null;
@@ -404,23 +414,35 @@ export function createNarrator({
 
   async function narrate(text) {
     const clean = String(text ?? '').trim();
+    // A line the prefetch scan never saw synthesizes on-camera — audible dead
+    // air. Flag it so the flow author knows to use a literal string.
+    const prefetchMiss = clean && engine && !requests.has(clean);
     // Request audio FIRST — a prefetched line resolves instantly (no dead air);
     // a miss synthesizes while the previous narration finishes playing.
     const segPromise = clean && engine ? request(clean, 'demand') : Promise.resolve(null);
-    await gate.wait(); // previous narration always finishes before this beat
+    await gate.waitBeat(); // the inter-line breath always elapses before speech
     if (!clean || !engine) { await visualBeat(clean); return; }
     const seg = await segPromise;
     if (!seg) { await visualBeat(clean); return; }
+    if (prefetchMiss) {
+      onWarn(`[narrator] "${clean.slice(0, 48)}" was synthesized on-camera (dynamic text?) — literal lines are pre-synthesized before recording`);
+    }
     const at = now(); // caption appears exactly when the narration starts
     await onCaption(clean, at);
     segments.push({ text: clean, at, file: seg.file, durationMs: seg.durationMs });
     gate.start({ at, durationMs: seg.durationMs });
-    await gate.wait(); // hold the scene for the FULL measured duration
+    // Hold the scene for the FULL measured duration only — the breath gap after
+    // it belongs to the NEXT beat's pre-wait, so cursor/spotlight mechanics
+    // overlap the gap instead of freezing through it.
+    await gate.waitSpeech();
   }
 
   return {
     narrate,
-    waitForNarration: gate.wait,
+    // Helpers release the moment speech ends — only the next spoken line holds
+    // the breath gap, so cursor, spotlight, and navigation start moving during
+    // it instead of after it.
+    waitForNarration: gate.waitSpeech,
     segments,
     // Queue literal lines for background synthesis (extracted from the flow
     // source before recording). Sequential — never two TTS requests at once.
@@ -435,6 +457,15 @@ export function createNarrator({
     ensure: (text) => {
       const clean = String(text ?? '').trim();
       return clean && engine ? request(clean, 'demand') : Promise.resolve(null);
+    },
+    // Resolves once every line requested so far has finished synthesizing —
+    // used pre-roll so literal lines never stall on-camera.
+    drain: () => Promise.all([...requests.values()].map((e) => e.promise)).then(() => undefined),
+    // Queue snapshot for progress reporting: { total, done, inFlight }.
+    stats: () => {
+      let done = 0;
+      for (const e of requests.values()) if (e.done) done += 1;
+      return { total: requests.size, done, inFlight: inFlight ? 1 : 0 };
     },
     // Stop background synthesis so an abandoned prefetch can't outlive the run.
     stop: () => {

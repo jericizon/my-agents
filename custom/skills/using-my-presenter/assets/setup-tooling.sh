@@ -19,11 +19,18 @@ ensure_pnpm() {
 
 ensure_tooling() {
   if [[ -d "$CACHE_DIR/node_modules/playwright" ]] && compgen -G "$CACHE_DIR/ms-browsers/chromium-*" >/dev/null 2>&1; then
-    echo "[client-demo] Reusing cached tooling in $CACHE_DIR"
+    if [[ -d "$CACHE_DIR/node_modules/docx" ]]; then
+      echo "[client-demo] Reusing cached tooling in $CACHE_DIR"
+      return 0
+    fi
+    # Cache predates the docs feature — add the docx dep incrementally.
+    echo "[client-demo] Adding docx to existing tooling cache"
+    cd "$CACHE_DIR"
+    pnpm add docx
     return 0
   fi
 
-  echo "[client-demo] Installing Playwright + ffmpeg-static into $CACHE_DIR (one-time)"
+  echo "[client-demo] Installing Playwright + ffmpeg-static + docx into $CACHE_DIR (one-time)"
   mkdir -p "$CACHE_DIR"
   cd "$CACHE_DIR"
 
@@ -31,7 +38,7 @@ ensure_tooling() {
     echo '{"name":"client-demo-tooling","private":true,"type":"module"}' > package.json
   fi
 
-  pnpm add --allow-build ffmpeg-static playwright
+  pnpm add --allow-build ffmpeg-static playwright docx
   PLAYWRIGHT_BROWSERS_PATH="$CACHE_DIR/ms-browsers" pnpm exec playwright install chromium
 }
 

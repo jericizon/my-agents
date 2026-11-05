@@ -94,6 +94,16 @@ test('gate starts a second segment only after the first fully ends', async () =>
   assert.ok(secondAt >= 2000 + 350, `second segment at ${secondAt} overlaps first end ${2000}`);
 });
 
+test('gate waitSpeech releases at audio end; waitBeat holds the breath', async () => {
+  const clock = virtualClock();
+  const gate = createNarrationGate({ now: clock.now, sleep: clock.sleep, gapMs: 350 });
+  gate.start({ at: 0, durationMs: 2000 });
+  await gate.waitSpeech();
+  assert.equal(clock.time(), 2000); // mechanics move the instant speech ends
+  await gate.waitBeat();
+  assert.equal(clock.time(), 2350); // only the next spoken line holds the gap
+});
+
 // ── createNarrator ───────────────────────────────────────────────────────────
 test('narrate blocks for the REAL measured duration, not an estimate', async () => {
   const clock = virtualClock();
@@ -110,8 +120,9 @@ test('narrate blocks for the REAL measured duration, not an estimate', async () 
       onCaption: (text, at) => { captions.push({ text, at }); },
     });
     await narrator.narrate('Hi');
-    // returned only after the real 4250ms + gap — no estimation involved
-    assert.equal(clock.time(), 4600);
+    // returned right at the real 4250ms audio end — no estimation involved; the
+    // breath gap belongs to the NEXT beat's pre-wait, not this call's post-hold
+    assert.equal(clock.time(), 4250);
     assert.equal(narrator.segments.length, 1);
     assert.equal(narrator.segments[0].durationMs, 4250);
     assert.equal(narrator.segments[0].at, 0);
@@ -137,7 +148,33 @@ test('consecutive narrations never overlap', async () => {
     await narrator.narrate('second');
     const [a, b] = narrator.segments;
     assert.ok(b.at >= a.at + a.durationMs + 350, `second at ${b.at} before first end+gap ${a.at + a.durationMs + 350}`);
-    assert.equal(clock.time(), b.at + b.durationMs + 350);
+    assert.equal(clock.time(), b.at + b.durationMs); // narrate returns at speech end
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('helpers release at speech end while the next spoken line still holds the breath', async () => {
+  const clock = virtualClock();
+  const dir = tmpDir();
+  try {
+    const narrator = createNarrator({
+      engine: fakeEngine,
+      outputDir: dir,
+      now: clock.now,
+      sleep: clock.sleep,
+      gapMs: 350,
+      fetchImpl: wavResponse(1),
+      onCaption: () => {},
+    });
+    await narrator.narrate('first');
+    assert.equal(clock.time(), 1000); // narrate returns at speech end, not end+gap
+    // a gated helper (cursor glide, spotlight, navigation) may move NOW —
+    // during the breath — instead of waiting it out frozen
+    await narrator.waitForNarration();
+    assert.equal(clock.time(), 1000);
+    await narrator.narrate('second');
+    const [a, b] = narrator.segments;
+    assert.equal(b.at, a.at + a.durationMs + 350); // breath preserved between lines
+    narrator.stop();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -403,9 +440,9 @@ test('a prefetched line plays with zero on-camera synthesis stall', async () => 
     assert.equal(clock.time(), 2000);
     assert.equal(fetches, 1);
     await narrator.narrate('ready line');
-    // on camera it only held for the real 1s audio + gap — no 2s stall
+    // on camera it only held for the real 1s audio — no 2s synthesis stall
     assert.deepEqual(shown, [{ text: 'ready line', at: 2000 }]);
-    assert.equal(clock.time(), 2000 + 1000 + 350);
+    assert.equal(clock.time(), 2000 + 1000);
     assert.equal(fetches, 1); // prefetched file reused — no second request
     assert.equal(narrator.segments.length, 1);
     narrator.stop();
@@ -479,6 +516,56 @@ test('a failed prefetch degrades to a visual caption, not a crash', async () => 
     assert.deepEqual(captions, [{ text: 'doomed line', at: 0 }]);
     assert.equal(clock.time(), 1500); // fell back to the silent read hold
     assert.ok(warnings.length >= 1);
+    narrator.stop();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('drain() waits for every queued line — the pre-roll bound', async () => {
+  const clock = virtualClock();
+  const dir = tmpDir();
+  try {
+    const narrator = createNarrator({
+      engine: fakeEngine,
+      outputDir: dir,
+      now: clock.now,
+      sleep: clock.sleep,
+      gapMs: 350,
+      fetchImpl: async () => { await clock.sleep(400); return new Response(wavBytes(1)); },
+      onCaption: () => {},
+    });
+    narrator.prefetch(['l1', 'l2', 'l3']);
+    assert.equal(narrator.stats().total, 3);
+    await narrator.drain();
+    assert.equal(clock.time(), 1200); // sequential single-worker queue: 3 × 400ms
+    const s = narrator.stats();
+    assert.equal(s.done, 3);
+    await narrator.narrate('l2'); // every line now plays stall-free
+    assert.equal(narrator.segments[0].text, 'l2');
+    narrator.stop();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a non-prefetched line is flagged as an on-camera stall', async () => {
+  const clock = virtualClock();
+  const dir = tmpDir();
+  const warnings = [];
+  try {
+    const narrator = createNarrator({
+      engine: fakeEngine,
+      outputDir: dir,
+      now: clock.now,
+      sleep: clock.sleep,
+      gapMs: 350,
+      fetchImpl: wavResponse(1),
+      onCaption: () => {},
+      onWarn: (m) => warnings.push(m),
+    });
+    narrator.prefetch(['known line']);
+    await narrator.narrate('surprise line'); // never prefetched → flagged
+    assert.ok(warnings.some((w) => w.includes('synthesized on-camera')), JSON.stringify(warnings));
+    warnings.length = 0;
+    await narrator.narrate('known line'); // prefetched → no flag
+    assert.equal(warnings.length, 0);
     narrator.stop();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
