@@ -51,6 +51,7 @@ Do NOT use when:
 
 - **Default: no voiceover.** Record silently (captions only) unless the user explicitly asks for spoken narration; pass `--voiceover` / `DEMO_VOICEOVER=1` only then. Caption voiceover only — no app audio, no invented music.
 - **VoiceStudio is the ONLY narration engine** — a local app exposing an OpenAI-compatible TTS API at `http://localhost:3900` (`VS_BASE_URL` to relocate). There is no Piper/espeak/other fallback.
+- **WSL2:** when `VS_BASE_URL` is unset the recorder probes `localhost` first, then the WSL2 default gateway (the Windows host) — VoiceStudio running on Windows serves WSL2 projects with zero config. Running VoiceStudio *inside* WSL2 needs WSLg (Electron GUI); prefer the Windows install.
 - **Availability ladder — walk it BEFORE recording with `--voiceover`:**
   1. Probe `curl -sf $VS_BASE_URL/v1/audio/voices`.
   2. Down but installed → launch `VoiceStudio` (`~/.local/bin/VoiceStudio`) in the background and poll until the API responds (~30×2s; first boot downloads its runtime and can take minutes).

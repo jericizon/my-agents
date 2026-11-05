@@ -90,12 +90,57 @@ export async function probeVoiceStudio({ baseUrl, timeoutMs = 4000, fetchImpl = 
   }
 }
 
-// Returns the VoiceStudio engine config, or null when the API is unreachable —
-// callers treat null as "record without voiceover" (the request is disregarded).
+function isWslEnv(env) {
+  if (env.WSL_DISTRO_NAME || env.WSL_INTEROP) return true;
+  try {
+    return /microsoft|wsl/i.test(readFileSync('/proc/version', 'utf8'));
+  } catch {
+    return false;
+  }
+}
+
+// Default-route gateway from /proc/net/route — on WSL2 that is the Windows host,
+// where VoiceStudio usually runs. Little-endian hex, e.g. 0102A8C0 → 192.168.2.1.
+function wslGatewayIp() {
+  try {
+    const routes = readFileSync('/proc/net/route', 'utf8').split('\n').slice(1);
+    for (const line of routes) {
+      const cols = line.trim().split(/\s+/);
+      if (cols[1] === '00000000' && /^[0-9A-Fa-f]{8}$/.test(cols[2] || '')) {
+        const n = parseInt(cols[2], 16);
+        return `${n & 255}.${(n >> 8) & 255}.${(n >> 16) & 255}.${(n >>> 24) & 255}`;
+      }
+    }
+  } catch { /* not linux or unreadable */ }
+  return null;
+}
+
+// Candidates, in probe order: explicit VS_BASE_URL always wins; then localhost;
+// then, on WSL2, the Windows-host gateway — so VoiceStudio running on Windows
+// serves WSL2 projects with zero extra config.
+function voiceoverBaseUrlCandidates(env) {
+  const explicit = String(env.VS_BASE_URL || '').trim();
+  if (explicit) return [explicit.replace(/\/+$/, '')];
+  const urls = [VOICESTUDIO_DEFAULTS.baseUrl];
+  if (isWslEnv(env)) {
+    const gw = wslGatewayIp();
+    if (gw) urls.push(`http://${gw}:3900`);
+  }
+  return urls;
+}
+
+// Returns the VoiceStudio engine config bound to the first base URL that
+// answers, or null when none is reachable — callers treat null as "record
+// without voiceover" (the request is disregarded).
 export async function resolveVoiceoverEngine({ env = process.env, fetchImpl = fetch } = {}) {
   const config = resolveVoiceoverConfig(env);
-  const up = await probeVoiceStudio({ baseUrl: config.baseUrl, fetchImpl });
-  return up ? { kind: 'voicestudio', ...config } : null;
+  const candidates = voiceoverBaseUrlCandidates(env);
+  for (const baseUrl of candidates) {
+    if (await probeVoiceStudio({ baseUrl, fetchImpl })) {
+      return { kind: 'voicestudio', ...config, baseUrl };
+    }
+  }
+  return null;
 }
 
 export function buildCaptionTimeline(captions) {

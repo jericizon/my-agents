@@ -374,6 +374,8 @@ async function loadFlow(flowPath) {
     if (!voiceoverEngine) {
       console.warn('[recorder] VoiceStudio unreachable — disregarding the voiceover request; recording without narration.');
       CONFIG.VOICEOVER = false;
+    } else {
+      console.log(`[recorder] VoiceStudio at ${voiceoverEngine.baseUrl} · voice ${voiceoverEngine.voice} · speed ${voiceoverEngine.speed}`);
     }
   }
   if (CONFIG.VOICEOVER && !ffmpegPath) {

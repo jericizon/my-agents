@@ -30,6 +30,9 @@ URL=$(curl -sf --max-time 20 "https://api.github.com/repos/$REPO/releases/latest
 [[ -n "$URL" ]] || { echo "ERROR: no Linux AppImage asset found in the latest release." >&2; exit 1; }
 
 mkdir -p "$(dirname "$BIN")"
+if grep -qiE "microsoft|wsl" /proc/version 2>/dev/null || [[ -n "${WSL_DISTRO_NAME:-}${WSL_INTEROP:-}" ]]; then
+  echo "[client-demo] WSL detected: an Electron GUI app needs WSLg here — VoiceStudio on the Windows host works too (the recorder auto-probes the WSL gateway)." >&2
+fi
 echo "[client-demo] Downloading $URL" >&2
 curl -fL --max-time 900 -o "$BIN.part" "$URL"
 chmod +x "$BIN.part"
