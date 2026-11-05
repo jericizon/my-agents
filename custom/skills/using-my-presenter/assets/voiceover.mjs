@@ -15,22 +15,30 @@ const VOICESTUDIO_DEFAULTS = Object.freeze({
   baseUrl: 'http://localhost:3900',
   model: 'omnivoice',
   voice: 'fc52c689', // VoiceStudio "The Companion" profile
-  speed: 1.2,
+  speed: 1.3,
   seed: 42,
   instructions: 'warm, friendly, expressive narrator with natural conversational delivery',
 });
 const SEGMENT_END_GAP_MS = 350; // silence between the end of one narration and the next beat
 const SILENT_READ_MS = 1500; // on-screen read hold when a narrate() can't produce audio
 
-// Bundled background bed: a deterministic ambient pad synthesized by ffmpeg's
-// aevalsrc at mux time — a Dm-add9 voicing of detuned partials with slow
-// breathing LFOs. No external file, no licensing concerns, always seamless.
-export const AMBIENT_BED_EXPR = '0.24*sin(2*PI*146.83*t)*(0.8+0.2*sin(2*PI*0.05*t))'
-  + '+0.18*sin(2*PI*220*t)*(0.8+0.2*sin(2*PI*0.07*t+1))'
-  + '+0.14*sin(2*PI*261.63*t)*(0.75+0.25*sin(2*PI*0.09*t+2))'
-  + '+0.12*sin(2*PI*349.23*t)*(0.7+0.3*sin(2*PI*0.11*t+3))'
-  + '+0.09*sin(2*PI*440*t)*(0.7+0.3*sin(2*PI*0.13*t+4))'
-  + '+0.045*sin(2*PI*880*t)*(0.65+0.35*sin(2*PI*0.06*t+5))';
+// Bundled background bed: a bright, lively pattern synthesized deterministically
+// by ffmpeg's aevalsrc at mux time — plucked 8th-note arpeggios cycling
+// C–G–Am–F at 120 BPM over a quarter-note bass pulse, with a soft fifth shimmer.
+// No external file, no licensing concerns, always seamless (8s pattern loop).
+const _chord = 'mod(floor(t*0.5),4)'; // chord index: one chord per 2s bar
+const _step = 'mod(floor(t*4),8)'; // 8th-note index within the bar
+const _pick = (idx, vals) => vals.map((v, i) => `eq(${idx},${i})*${v}`).join('+');
+const _root = _pick(_chord, [261.63, 196.0, 220.0, 174.61]); // C4 G3 A3 F3
+const _semi = `eq(${_chord},2)*(${_pick(_step, [0, 3, 7, 12, 7, 3, 7, 12])})`
+  + `+(1-eq(${_chord},2))*(${_pick(_step, [0, 4, 7, 12, 7, 4, 7, 12])})`;
+const _arp = `(${_root})*pow(2,(${_semi})/12)`;
+const _arpEnv = 'exp(-mod(t*4,1)*5.5)'; // pluck decay, resets each 8th note
+const _bassEnv = 'exp(-mod(t*2,1)*3.5)'; // pulse decay, resets each quarter note
+export const BUNDLED_BED_EXPR = `0.26*(sin(2*PI*(${_arp})*t)`
+  + `+0.45*sin(2*PI*(${_arp})*2*t)+0.2*sin(2*PI*(${_arp})*3*t))*(${_arpEnv})`
+  + `+0.30*(sin(2*PI*(${_root})*0.5*t)+0.3*sin(2*PI*(${_root})*t))*(${_bassEnv})`
+  + `+0.05*sin(2*PI*(${_root})*1.498*t)*(0.7+0.3*sin(2*PI*0.4*t))`;
 const MUSIC_DEFAULTS = Object.freeze({
   gain: 0.25,
   fadeInSec: 1.5,
@@ -48,7 +56,7 @@ export function resolveMusicPlan({ voiceover, music, env = process.env, existsIm
   let source = { kind: 'bed' };
   if (raw && !/^auto$/i.test(raw)) {
     if (existsImpl(raw)) source = { kind: 'file', path: raw };
-    else warn(`[recorder] music file not found: ${raw} — using the bundled ambient bed`);
+    else warn(`[recorder] music file not found: ${raw} — using the bundled bed`);
   }
   return {
     enabled: true,
@@ -681,7 +689,7 @@ export function buildMuxArgs({ inputVideo, audioFiles, captions, output, format,
   for (const audioFile of audioFiles) args.push('-i', audioFile);
   if (music?.enabled) {
     if (music.source?.kind === 'file') args.push('-stream_loop', '-1', '-i', music.source.path);
-    else args.push('-f', 'lavfi', '-i', `aevalsrc=${AMBIENT_BED_EXPR}:s=48000:d=${Number(totalSec || 0).toFixed(2)}`);
+    else args.push('-f', 'lavfi', '-i', `aevalsrc='${BUNDLED_BED_EXPR}':s=48000:d=${Number(totalSec || 0).toFixed(2)}`);
   }
   const extraCount = extraInputArgs.filter((arg) => arg === '-i').length;
   const audioFilter = buildAudioMixFilter(captions, env, extraCount, music, totalSec);

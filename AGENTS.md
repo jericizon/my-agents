@@ -9,7 +9,8 @@ This repository manages the agent skills catalog: upstream mirrors, local overri
 - `custom/skills/`: editable local skills and overrides copied into the generated tree last (wins all name conflicts). `using-my-skills`, the single meta-skill entry point, lives here.
 - `superpowers-agents/skills/`: generated merge target, gitignored — never edit by hand.
 - `shared/rules/global_rules.md`, `shared/policy/TASK_CONTINUITY.md`: canonical global rules and the Universal AI Coding Agent Policy, symlinked into each harness config on sync.
-- `sync-agents.sh`: the only maintenance entrypoint (clone/refresh mirrors → rebuild generated tree → relink runtime paths, rules, policy).
+- `sync-agents.sh`: the only maintenance entrypoint (clone/refresh mirrors → rebuild generated tree → relink runtime paths, rules, policy → install git hooks).
+- `hooks/`: tracked git hook sources (`post-merge` re-runs `./sync-agents.sh` after `git pull`; `post-rewrite` covers `git pull --rebase`). Sync links them into `.git/hooks` — they activate after the first sync on a clone.
 - `quota-recovery-controller.sh`, `tests/`, `docs/`, `tasks/`, `.superpowers/`.
 - `~/Workspace/_shared/<project>` (or `~/workspace/_shared/<project>`): central root for generated artifacts (specs, plans, QA reports, `.superpowers/` state). Created by `sync-agents.sh`; new generated content goes there — not into this repo — resolved per the Shared Workspace Artifacts contract in `shared/rules/global_rules.md`.
 

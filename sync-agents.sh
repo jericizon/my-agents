@@ -105,6 +105,27 @@ install_policy() {
     install_symlink "$SOURCE_POLICY" "$target"
 }
 
+# Links the tracked hooks/ scripts into .git/hooks so `git pull` re-runs this
+# sync automatically (post-merge covers normal pulls, post-rewrite --rebase).
+install_git_hooks() {
+    local hooks_dst="$SCRIPT_DIR/.git/hooks"
+    local name target
+
+    # Worktrees/exported copies have no .git dir — nothing to install into.
+    [ -d "$hooks_dst" ] || return 0
+
+    echo "Installing git hooks (auto-sync after git pull)..."
+    for name in post-merge post-rewrite; do
+        target="$hooks_dst/$name"
+        if [ -e "$target" ] || [ -L "$target" ]; then
+            continue  # already installed or a user-managed hook — leave it
+        fi
+        ln -s "../../hooks/$name" "$target"
+        echo "Linked:"
+        echo "  $target -> hooks/$name"
+    done
+}
+
 # Convention: <workspace>/_shared/<project-relpath> — see shared/rules/global_rules.md.
 ensure_shared_workspace() {
     local ws_root
@@ -399,6 +420,9 @@ install_global_rules
 
 echo ""
 install_policy
+
+echo ""
+install_git_hooks
 
 echo ""
 ensure_shared_workspace

@@ -40,10 +40,10 @@
  *   --voiceover      Spoken narration for h.narrate()/h.explain() via VoiceStudio
  *                    (OpenAI-compatible API, default http://localhost:3900).
  *                    Disregarded silently when VoiceStudio is unreachable.
- *                    Adds a subtle ambient background-music bed automatically.
+ *                    Adds a lively background-music bed automatically.
  *   --music <mode>   Background music: 'none' to disable, a file path for a
  *                    custom bed, or 'auto' (default with --voiceover) for the
- *                    bundled ambient bed. (env DEMO_MUSIC)
+ *                    bundled bed. (env DEMO_MUSIC)
  *
  * THE FLOW FILE (see example-flow.mjs next to this file):
  *   export default async function runFlow(page, h) { ... }
@@ -238,6 +238,33 @@ function buildAssTrack(segments, { fontPx, color, align, marginV, marginLR, wrap
   ].join('\n');
 }
 
+// The URL pill draws with wrap:2 (no wrapping), so a long URL would paint past
+// the pill edges onto the chrome bar. Middle-truncate like a real browser bar —
+// keep the origin and the tail. Widths are estimated per character class since
+// the mux pipeline can't measure rendered glyphs.
+const urlCharEm = (c) => {
+  if ('./:-_~,;|'.includes(c)) return 0.38;
+  if ('%@#'.includes(c)) return 0.95;
+  if (c >= '0' && c <= '9') return 0.64;
+  if (c >= 'A' && c <= 'Z') return 0.7;
+  return 0.55; // lowercase and remaining symbols
+};
+const fitPillText = (raw, fontPx) => {
+  const budgetEm = (CONFIG.VIEWPORT.width * 0.52 - 44) / fontPx; // pill is 52% of the window
+  const em = (s) => { let w = 0; for (const c of s) w += urlCharEm(c); return w; };
+  if (em(raw) <= budgetEm) return raw;
+  const headBudget = (budgetEm - 1) * 0.62;
+  const tailBudget = budgetEm - 1 - headBudget;
+  let head = '';
+  let tail = '';
+  for (const c of raw) { if (em(head + c) > headBudget) break; head += c; }
+  for (let i = raw.length - 1; i >= head.length; i--) {
+    if (em(raw[i] + tail) > tailBudget) break;
+    tail = raw[i] + tail;
+  }
+  return `${head}…${tail}`;
+};
+
 // ── Injected per-document overlay: animated cursor + caption lane + spotlight ──
 // Runs before page scripts on every navigation, so it survives reloads/route changes.
 const overlayInit = ({ lanePx, fontPx }) => {
@@ -397,7 +424,7 @@ async function loadFlow(flowPath) {
     warn: (m) => console.warn(m),
   });
   if (CONFIG.VOICEOVER && musicPlan.enabled) {
-    console.log(`[recorder] background music: ${musicPlan.source.kind === 'file' ? musicPlan.source.path : 'bundled ambient bed'} · gain ${musicPlan.gain}`);
+    console.log(`[recorder] background music: ${musicPlan.source.kind === 'file' ? musicPlan.source.path : 'bundled bed'} · gain ${musicPlan.gain}`);
   }
 
   // Narration prefetch: pull the flow's literal narrate()/explain() lines and
@@ -643,7 +670,7 @@ async function loadFlow(flowPath) {
       const urlFontPx = Math.max(20, Math.round(CANVAS_W * 0.015));
       const urlSegments = urlTimeline.map((s) => {
         const raw = (s.url === 'about:blank' ? '' : String(s.url || '')).replace(/[{}]/g, '').trim();
-        return { text: raw.length > 96 ? `${raw.slice(0, 93)}...` : raw, at: s.at };
+        return { text: fitPillText(raw, urlFontPx), at: s.at };
       });
       const urlAss = buildAssTrack(urlSegments, {
         fontPx: urlFontPx,
