@@ -1,5 +1,5 @@
-import { execFileSync, spawnSync as defaultSpawnSync } from 'child_process';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs';
+import { execFileSync } from 'child_process';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, renameSync } from 'fs';
 import path from 'path';
 
 const VOICEOVER_TRUE_VALUES = new Set(['1', 'true', 'yes', 'on']);
@@ -8,13 +8,19 @@ const AUDIO_NORMALIZATION_DEFAULTS = Object.freeze({
   maxTruePeak: -1.5,
   loudnessRange: 7,
 });
-const PIPER_VOICE_DEFAULTS = Object.freeze({
-  lengthScale: 1,
-  noiseScale: 0.667,
-  noiseWScale: 0.8,
-  sentenceSilence: 0.12,
-  volume: 1,
+// VoiceStudio (debpalash/VoiceStudio) is the ONLY voiceover engine: a local app
+// exposing an OpenAI-compatible TTS API. No fallback engines — when it is
+// unreachable the recorder disregards the voiceover request and stays silent.
+const VOICESTUDIO_DEFAULTS = Object.freeze({
+  baseUrl: 'http://localhost:3900',
+  model: 'omnivoice',
+  voice: 'fc52c689', // VoiceStudio "The Companion" profile
+  speed: 1.2,
+  seed: 42,
+  instructions: 'warm, friendly, expressive narrator with natural conversational delivery',
 });
+const SEGMENT_END_GAP_MS = 350; // silence tail each segment must leave before the next caption
+const ATEMPO_MAX = 3; // tempo ceiling when squeezing one segment into its caption window
 
 export function isVoiceoverEnabled(value) {
   if (typeof value === 'boolean') return value;
@@ -57,130 +63,39 @@ function resolveAudioNormalization(env) {
   };
 }
 
-function resolvePiperVoiceOptions(env) {
+function resolveVoiceoverConfig(env) {
   return {
-    lengthScale: readConfiguredNumber(env, 'DEMO_TTS_LENGTH_SCALE', PIPER_VOICE_DEFAULTS.lengthScale, {
-      min: 0,
-      max: 2,
-      minExclusive: true,
-      rangeDescription: 'greater than 0 and at most 2',
+    baseUrl: String(env.VS_BASE_URL || VOICESTUDIO_DEFAULTS.baseUrl).replace(/\/+$/, ''),
+    model: String(env.VS_MODEL || VOICESTUDIO_DEFAULTS.model),
+    voice: String(env.VS_VOICE || VOICESTUDIO_DEFAULTS.voice),
+    speed: readConfiguredNumber(env, 'VS_SPEED', VOICESTUDIO_DEFAULTS.speed, {
+      min: 0.25,
+      max: 4,
+      rangeDescription: 'between 0.25 and 4',
     }),
-    noiseScale: readConfiguredNumber(env, 'DEMO_TTS_NOISE_SCALE', PIPER_VOICE_DEFAULTS.noiseScale, {
-      max: 2,
-      rangeDescription: 'between 0 and 2',
-    }),
-    noiseWScale: readConfiguredNumber(env, 'DEMO_TTS_NOISE_W_SCALE', PIPER_VOICE_DEFAULTS.noiseWScale, {
-      max: 2,
-      rangeDescription: 'between 0 and 2',
-    }),
-    sentenceSilence: readConfiguredNumber(env, 'DEMO_TTS_SENTENCE_SILENCE', PIPER_VOICE_DEFAULTS.sentenceSilence, {
-      max: 2,
-      rangeDescription: 'between 0 and 2',
-    }),
-    volume: readConfiguredNumber(env, 'DEMO_TTS_VOLUME', PIPER_VOICE_DEFAULTS.volume, {
-      min: 0,
-      max: 2,
-      minExclusive: true,
-      rangeDescription: 'greater than 0 and at most 2',
-    }),
+    seed: Math.round(readConfiguredNumber(env, 'VS_SEED', VOICESTUDIO_DEFAULTS.seed, {
+      max: 4294967295,
+      rangeDescription: 'between 0 and 4294967295',
+    })),
+    instructions: String(env.VS_INSTRUCTIONS || VOICESTUDIO_DEFAULTS.instructions),
   };
 }
 
-function isExecutable(file, platform) {
+export async function probeVoiceStudio({ baseUrl, timeoutMs = 4000, fetchImpl = fetch } = {}) {
   try {
-    const stat = statSync(file);
-    return stat.isFile() && (platform === 'win32' || (stat.mode & 0o111) !== 0);
+    const res = await fetchImpl(`${baseUrl}/v1/audio/voices`, { signal: AbortSignal.timeout(timeoutMs) });
+    return Boolean(res && res.ok);
   } catch {
     return false;
   }
 }
 
-export function resolveExecutable(command, { platform = process.platform, env = process.env } = {}) {
-  if (!command) return null;
-  if (path.isAbsolute(command)) return isExecutable(command, platform) ? command : null;
-
-  const pathEntries = String(env.PATH || '').split(path.delimiter).filter(Boolean);
-  const extensions = platform === 'win32'
-    ? String(env.PATHEXT || '.EXE;.CMD;.BAT;.COM').split(';')
-    : [''];
-
-  for (const entry of pathEntries) {
-    for (const extension of extensions) {
-      const candidate = path.join(entry, command + extension);
-      if (isExecutable(candidate, platform)) return candidate;
-    }
-  }
-  return null;
-}
-
-const TTS_ENGINE_CONFIG = {
-  darwin: { kind: 'say', candidates: ['say'], label: 'macOS say' },
-  win32: {
-    kind: 'powershell',
-    candidates: ['powershell.exe', 'pwsh.exe', 'powershell', 'pwsh'],
-    label: 'Windows PowerShell with SAPI',
-  },
-  linux: { kind: 'espeak', candidates: ['espeak-ng', 'espeak'], label: 'Linux espeak-ng or espeak' },
-  freebsd: { kind: 'espeak', candidates: ['espeak-ng', 'espeak'], label: 'BSD espeak-ng or espeak' },
-  openbsd: { kind: 'espeak', candidates: ['espeak-ng', 'espeak'], label: 'BSD espeak-ng or espeak' },
-  sunos: { kind: 'espeak', candidates: ['espeak-ng', 'espeak'], label: 'SunOS espeak-ng or espeak' },
-};
-
-function isRegularFile(file) {
-  try {
-    return statSync(file).isFile();
-  } catch {
-    return false;
-  }
-}
-
-function resolvePiperEngine({ platform, env }) {
-  const candidates = env.DEMO_TTS_BIN ? [env.DEMO_TTS_BIN] : ['piper'];
-  const command = candidates.map((candidate) => resolveExecutable(candidate, { platform, env })).find(Boolean);
-  if (!command) {
-    throw new Error('Piper voiceover requested but the piper executable was not found. Run setup-voiceover.sh or set DEMO_TTS_BIN.');
-  }
-
-  const model = String(env.DEMO_TTS_MODEL || '').trim();
-  if (!model) {
-    throw new Error('Piper voiceover requested but DEMO_TTS_MODEL is not set. Point it to a downloaded .onnx voice model.');
-  }
-  const modelPath = path.resolve(model);
-  if (!isRegularFile(modelPath)) {
-    throw new Error(`Piper voice model not found: ${modelPath}`);
-  }
-  const configPath = `${modelPath}.json`;
-  if (!isRegularFile(configPath)) {
-    throw new Error(`Piper voice model config not found: ${configPath}`);
-  }
-  try {
-    JSON.parse(readFileSync(configPath, 'utf8'));
-  } catch {
-    throw new Error(`Piper voice model config is not valid JSON: ${configPath}`);
-  }
-
-  return { kind: 'piper', command, model: modelPath };
-}
-
-export function resolveTtsEngine({ platform = process.platform, env = process.env } = {}) {
-  const requestedKind = String(env.DEMO_TTS_ENGINE || '').trim().toLowerCase();
-  if (requestedKind === 'piper') return resolvePiperEngine({ platform, env });
-
-  const config = TTS_ENGINE_CONFIG[platform];
-  if (!config) {
-    throw new Error(`Voiceover is not supported on platform ${platform}; set up a supported local TTS engine first.`);
-  }
-  if (requestedKind && requestedKind !== config.kind) {
-    throw new Error(`DEMO_TTS_ENGINE '${requestedKind}' is not supported on ${platform}; use '${config.kind}' or 'piper'.`);
-  }
-
-  const candidates = env.DEMO_TTS_BIN ? [env.DEMO_TTS_BIN] : config.candidates;
-  const command = candidates.map((candidate) => resolveExecutable(candidate, { platform, env })).find(Boolean);
-  if (!command) {
-    throw new Error(`Voiceover requested but no supported local TTS engine was found (${config.label}). Install it or set DEMO_TTS_BIN.`);
-  }
-
-  return { kind: config.kind, command };
+// Returns the VoiceStudio engine config, or null when the API is unreachable —
+// callers treat null as "record without voiceover" (the request is disregarded).
+export async function resolveVoiceoverEngine({ env = process.env, fetchImpl = fetch } = {}) {
+  const config = resolveVoiceoverConfig(env);
+  const up = await probeVoiceStudio({ baseUrl: config.baseUrl, fetchImpl });
+  return up ? { kind: 'voicestudio', ...config } : null;
 }
 
 export function buildCaptionTimeline(captions) {
@@ -193,90 +108,120 @@ export function buildCaptionTimeline(captions) {
   });
 }
 
-export function createTtsAudio(engine, text, outputPath, { spawnSync = defaultSpawnSync, env = process.env } = {}) {
+// RIFF/WAVE duration in seconds — the mixer needs each segment's length to keep
+// it inside its caption window. Returns null for non-wav or unparseable files.
+function wavDurationSeconds(file) {
+  try {
+    const buf = readFileSync(file);
+    if (buf.length < 44 || buf.toString('ascii', 0, 4) !== 'RIFF' || buf.toString('ascii', 8, 12) !== 'WAVE') return null;
+    let offset = 12;
+    let byteRate = 0;
+    let dataSize = 0;
+    while (offset + 8 <= buf.length) {
+      const id = buf.toString('ascii', offset, offset + 4);
+      const size = buf.readUInt32LE(offset + 4);
+      if (id === 'fmt ') byteRate = buf.readUInt32LE(offset + 12);
+      if (id === 'data') { dataSize = size; break; }
+      offset += 8 + size + (size % 2);
+    }
+    return byteRate && dataSize ? dataSize / byteRate : null;
+  } catch {
+    return null;
+  }
+}
+
+// ffmpeg prints "Duration: HH:MM:SS.cc" on stderr for `-i` before failing.
+function probeMediaDurationSeconds(ffmpeg, mediaPath, execFile = execFileSync) {
+  try {
+    execFile(ffmpeg, ['-i', mediaPath], { stdio: 'pipe' });
+  } catch (error) {
+    const text = `${error.stderr || ''}${error.stdout || ''}`;
+    const match = text.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+    if (match) return Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+  }
+  return null;
+}
+
+export async function createTtsAudio(engine, text, outputPath, { fetchImpl = fetch, execFile = execFileSync, ffmpeg } = {}) {
   const spokenText = String(text || '').trim();
   if (!spokenText) throw new Error('Cannot generate voiceover audio for an empty caption.');
+  if (engine?.kind !== 'voicestudio') throw new Error(`Unsupported TTS engine: ${engine?.kind}`);
   mkdirSync(path.dirname(outputPath), { recursive: true });
 
-  let result;
-  if (engine.kind === 'piper') {
-    const options = resolvePiperVoiceOptions(env);
-    result = spawnSync(engine.command, [
-      '--model', engine.model,
-      '--output_file', outputPath,
-      '--length_scale', String(options.lengthScale),
-      '--noise_scale', String(options.noiseScale),
-      '--noise_w_scale', String(options.noiseWScale),
-      '--sentence_silence', String(options.sentenceSilence),
-      '--volume', String(options.volume),
-    ], {
-      input: `${spokenText}\n`,
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-    });
-    if (result.error || result.status !== 0) {
-      throw new Error(`TTS failed for caption: ${result.error?.message || String(result.stderr || '').trim() || `exit code ${result.status}`}`);
-    }
-  } else if (engine.kind === 'espeak') {
-    result = spawnSync(engine.command, ['--stdout', spokenText], {
-      encoding: null,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    });
-    if (result.error || result.status !== 0) {
-      throw new Error(`TTS failed for caption: ${result.error?.message || String(result.stderr || '').trim() || `exit code ${result.status}`}`);
-    }
-    writeFileSync(outputPath, result.stdout);
-  } else if (engine.kind === 'say') {
-    result = spawnSync(engine.command, ['-o', outputPath, spokenText], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    });
-    if (result.error || result.status !== 0) {
-      throw new Error(`TTS failed for caption: ${result.error?.message || String(result.stderr || '').trim() || `exit code ${result.status}`}`);
-    }
-  } else if (engine.kind === 'powershell') {
-    const script = '$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; try { $s.SetOutputToWaveFile($env:DEMO_VOICEOVER_OUTPUT); $s.Speak($env:DEMO_VOICEOVER_TEXT) } finally { $s.Dispose() }';
-    result = spawnSync(engine.command, ['-NoProfile', '-NonInteractive', '-Command', script], {
-      encoding: 'utf8',
-      env: { ...env, DEMO_VOICEOVER_OUTPUT: outputPath, DEMO_VOICEOVER_TEXT: spokenText },
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    });
-    if (result.error || result.status !== 0) {
-      throw new Error(`TTS failed for caption: ${result.error?.message || String(result.stderr || '').trim() || `exit code ${result.status}`}`);
-    }
-  } else {
-    throw new Error(`Unsupported TTS engine: ${engine.kind}`);
+  const body = {
+    model: engine.model,
+    voice: engine.voice,
+    input: spokenText,
+    response_format: 'wav',
+    speed: engine.speed,
+    seed: engine.seed,
+    instructions: engine.instructions,
+  };
+  const res = await fetchImpl(`${engine.baseUrl}/v1/audio/speech`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(600000),
+  });
+  if (!res || !res.ok) {
+    throw new Error(`VoiceStudio TTS failed for caption: HTTP ${res ? res.status : 'no response'}`);
   }
+  writeFileSync(outputPath, Buffer.from(await res.arrayBuffer()));
 
   if (!existsSync(outputPath) || statSync(outputPath).size === 0) {
     throw new Error(`TTS produced no audio file at ${outputPath}`);
   }
+  // OmniVoice can cut a wav off mid-word — fade the last 120ms and pad 150ms
+  // of silence so every segment ends softly instead of with a hard stop.
+  const duration = wavDurationSeconds(outputPath);
+  if (ffmpeg && duration && duration > 0.3) {
+    const tmp = `${outputPath}.tmp.wav`;
+    execFile(ffmpeg, [
+      '-y', '-v', 'error', '-i', outputPath,
+      '-af', `afade=t=out:st=${(duration - 0.12).toFixed(3)}:d=0.12,apad=pad_dur=0.15`,
+      '-ar', '48000', tmp,
+    ], { stdio: 'ignore' });
+    renameSync(tmp, outputPath);
+  }
   return outputPath;
 }
 
-export function generateVoiceoverSegments({ captions, engine, outputDir, spawnSync = defaultSpawnSync, env = process.env } = {}) {
+export async function generateVoiceoverSegments({ captions, engine, outputDir, fetchImpl = fetch, execFile = execFileSync, ffmpeg } = {}) {
   const timeline = buildCaptionTimeline(captions);
   if (!timeline.length) throw new Error('Voiceover requested but the flow produced no non-empty captions.');
   mkdirSync(outputDir, { recursive: true });
-  const extension = engine.kind === 'say' ? 'aiff' : 'wav';
-  return timeline.map((caption, index) => {
-    const file = path.join(outputDir, `${String(index + 1).padStart(3, '0')}.${extension}`);
-    createTtsAudio(engine, caption.text, file, { spawnSync, env });
-    return file;
-  });
+  const files = [];
+  for (const [index, caption] of timeline.entries()) {
+    const file = path.join(outputDir, `${String(index + 1).padStart(3, '0')}.wav`);
+    await createTtsAudio(engine, caption.text, file, { fetchImpl, execFile, ffmpeg });
+    files.push(file);
+  }
+  return files;
 }
 
-export function buildAudioMixFilter(captions, env = process.env, inputOffset = 0) {
+export function buildAudioMixFilter(captions, env = process.env, inputOffset = 0, segmentDurations = [], totalDurationMs = null) {
   const timeline = buildCaptionTimeline(captions);
   if (!timeline.length) throw new Error('Cannot build an audio mix without captions.');
   const base = 1 + inputOffset;
+  const endGapMs = readConfiguredNumber(env, 'DEMO_VO_GAP_MS', SEGMENT_END_GAP_MS, {
+    min: 0,
+    max: 10000,
+    rangeDescription: 'between 0 and 10000',
+  });
   const delayed = timeline.map((caption, index) => {
-    const delay = Math.max(0, Math.round(caption.at));
-    return `[${base + index}:a]adelay=${delay}:all=1[a${index}]`;
+    const at = Math.max(0, Math.round(caption.at));
+    const nextAt = index + 1 < timeline.length
+      ? timeline[index + 1].at
+      : (totalDurationMs ?? Number.POSITIVE_INFINITY);
+    const availableSec = (nextAt - at - endGapMs) / 1000;
+    const durationSec = Number(segmentDurations[index]);
+    // Squeeze a segment that would outlast its caption window so narration
+    // never overlaps the next caption's narration.
+    let pre = '';
+    if (Number.isFinite(durationSec) && durationSec > 0 && availableSec > 0.25 && durationSec > availableSec) {
+      pre = `atempo=${Math.min(durationSec / availableSec, ATEMPO_MAX).toFixed(3)},`;
+    }
+    return `[${base + index}:a]${pre}adelay=${at}:all=1[a${index}]`;
   });
   const inputs = timeline.map((_, index) => `[a${index}]`).join('');
   delayed.push(`${inputs}amix=inputs=${timeline.length}:duration=longest:dropout_transition=0:normalize=1[aout]`);
@@ -285,7 +230,7 @@ export function buildAudioMixFilter(captions, env = process.env, inputOffset = 0
   return delayed.join(';');
 }
 
-export function buildMuxArgs({ inputVideo, audioFiles, captions, output, format, env = process.env, fps, videoChain, extraInputArgs = [] }) {
+export function buildMuxArgs({ inputVideo, audioFiles, captions, output, format, env = process.env, fps, videoChain, extraInputArgs = [], segmentDurations = [], totalDurationMs = null }) {
   if (!Array.isArray(audioFiles) || !audioFiles.length) {
     throw new Error('Cannot mux voiceover without generated audio segments.');
   }
@@ -293,7 +238,7 @@ export function buildMuxArgs({ inputVideo, audioFiles, captions, output, format,
   const args = ['-y', '-i', inputVideo, ...extraInputArgs];
   for (const audioFile of audioFiles) args.push('-i', audioFile);
   const extraCount = extraInputArgs.filter((arg) => arg === '-i').length;
-  const audioFilter = buildAudioMixFilter(captions, env, extraCount);
+  const audioFilter = buildAudioMixFilter(captions, env, extraCount, segmentDurations, totalDurationMs);
   let videoMap = '0:v:0';
   let filter = audioFilter;
   if (format === 'mp4' && videoChain) {
@@ -320,7 +265,13 @@ export function buildMuxArgs({ inputVideo, audioFiles, captions, output, format,
 
 export function muxVoiceover({ ffmpeg, inputVideo, audioFiles, captions, output, format, env = process.env, execFile = execFileSync, fps, videoChain, extraInputArgs = [], cwd }) {
   mkdirSync(path.dirname(output), { recursive: true });
-  const args = buildMuxArgs({ inputVideo, audioFiles, captions, output, format, env, fps, videoChain, extraInputArgs });
+  const segmentDurations = audioFiles.map((file) => wavDurationSeconds(file));
+  const videoSeconds = probeMediaDurationSeconds(ffmpeg, inputVideo, execFile);
+  const totalDurationMs = videoSeconds ? videoSeconds * 1000 : null;
+  const args = buildMuxArgs({
+    inputVideo, audioFiles, captions, output, format, env, fps, videoChain, extraInputArgs,
+    segmentDurations, totalDurationMs,
+  });
   try {
     execFile(ffmpeg, args, cwd ? { stdio: 'ignore', cwd } : { stdio: 'ignore' });
   } catch (error) {

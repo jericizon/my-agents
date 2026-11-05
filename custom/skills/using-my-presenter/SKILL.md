@@ -7,7 +7,7 @@ description: Use when the user wants a client-presentable or stakeholder demo wa
 
 ## Overview
 
-**Verify first, then record.** Produce polished, client-presentable walkthrough videos of the already-running app: real Chromium recordings with a **visible animated mouse cursor**, **spotlight highlighting** on narrated elements, **subtitle captions burned below the browser window**, **milestone screenshots**, and `.mp4` output composited as a **macOS-style floating browser window** on a white canvas. Optional `--voiceover` turns captions into a synchronized spoken track.
+**Verify first, then record.** Produce polished, client-presentable walkthrough videos of the already-running app: real Chromium recordings with a **visible animated mouse cursor**, **spotlight highlighting** on narrated elements, **subtitle captions burned below the browser window**, **milestone screenshots**, and `.mp4` output composited as a **macOS-style floating browser window** on a white canvas. Optional `--voiceover` narrates each caption through VoiceStudio, paced so every spoken segment finishes before the next step begins.
 
 Two scales, one pipeline:
 
@@ -50,17 +50,17 @@ Do NOT use when:
 ### Voiceover rules
 
 - **Default: no voiceover.** Record silently (captions only) unless the user explicitly asks for spoken narration; pass `--voiceover` / `DEMO_VOICEOVER=1` only then. Caption voiceover only — no app audio, no invented music.
-- **When narration is required, prefer VoiceStudio** (local app, OpenAI-compatible API at `http://localhost:3900/v1`):
-  1. Probe `http://localhost:3900/v1/models`. If unreachable, launch `VoiceStudio` in the background and poll until the API responds — boot it, don't skip it.
-  2. Generate each caption's audio through its speech endpoint (or `omnivoice-infer` CLI if installed) with voice **"The Companion"** unless the user names a different voice.
-  3. Mux the generated segments into the video at their caption timestamps (through the recorder's voiceover pipeline, or assembled with `ffmpeg-static` at the same timestamps).
-  4. If VoiceStudio can't start or produce audio, fall back to Piper (`en_US-lessac-high` via `assets/setup-voiceover.sh`) — and say so; don't claim VoiceStudio was used.
-- **One voice for the whole video.** Never mix engines or voices across captions in a single deliverable.
-- **Pacing: give the viewer time to read and listen.** Every caption must stay on screen long enough to be read AND for its spoken segment to finish before the next step — keep `h.sleep(...)` after captions at least the segment's speech duration plus a short buffer. No overlapping audio: a segment starts at its caption timestamp and the next action waits for it to end. If speech overruns the slot, lengthen the pause or split the caption — never trim audio to fit.
+- **VoiceStudio is the ONLY narration engine** — a local app exposing an OpenAI-compatible TTS API at `http://localhost:3900` (`VS_BASE_URL` to relocate). There is no Piper/espeak/other fallback.
+- **Availability ladder — walk it BEFORE recording with `--voiceover`:**
+  1. Probe `curl -sf $VS_BASE_URL/v1/audio/voices`.
+  2. Down but installed → launch `VoiceStudio` (`~/.local/bin/VoiceStudio`) in the background and poll until the API responds (~30×2s; first boot downloads its runtime and can take minutes).
+  3. Not installed → **ask the user whether to install VoiceStudio**; on confirmation run `assets/setup-voicestudio.sh` (latest `debpalash/VoiceStudio` GitHub release → `~/.local/bin`), then launch and poll.
+  4. Still unreachable, install declined/failed → record **without** narration — the voiceover request is disregarded (the recorder does this itself); say so in the report. Never substitute another engine.
+- **One voice for the whole video.** Default `"The Companion"` profile (`VS_VOICE=fc52c689`); change only when the user names a different voice. `VS_SPEED` sets pace (default `1.2` — a normal conversational rate); `VS_MODEL`, `VS_SEED`, `VS_INSTRUCTIONS` tune the speech request.
+- **Pacing is automatic — narrations can never overlap.** With `--voiceover` the recorder holds each caption until its spoken segment has finished (estimated from caption length; tune via `DEMO_VO_CPS` / `DEMO_VO_BASE_MS` / `DEMO_VO_GAP_MS`) before the next caption appears or the spotlight moves — an element never takes focus while the previous explanation is still playing. The mixer also fits every segment inside its caption window as a backstop. Flows no longer need hand-timed `h.sleep` padding for speech.
 - Verify `AUDIO_STREAM=` in recorder logs and probe the final file (`ffmpeg -i <video> -map 0:a:0 -f null -`).
-- The mux applies single-pass EBU R128 loudness normalization (`-16 LUFS`, `-1.5 dBTP`, `7 LU`) regardless of engine. Override only via `DEMO_AUDIO_TARGET_LUFS` / `DEMO_AUDIO_MAX_TRUE_PEAK` / `DEMO_AUDIO_TARGET_LRA` when the delivery platform requires it — no guessed `dynaudnorm`/volume boosts.
-- VoiceStudio and Piper are synthetic TTS — natural-sounding but not human. Never claim human/non-AI narration; that claim requires a supplied human recording.
-- If voiceover was requested but VoiceStudio can't produce audio and no fallback engine + `ffmpeg-static` is available, report `BLOCKED` before recording.
+- The mux applies single-pass EBU R128 loudness normalization (`-16 LUFS`, `-1.5 dBTP`, `7 LU`). Override only via `DEMO_AUDIO_TARGET_LUFS` / `DEMO_AUDIO_MAX_TRUE_PEAK` / `DEMO_AUDIO_TARGET_LRA` when the delivery platform requires it — no guessed `dynaudnorm`/volume boosts.
+- VoiceStudio is synthetic TTS — natural-sounding but not human. Never claim human/non-AI narration; that claim requires a supplied human recording.
 
 ## Workflow
 
@@ -92,8 +92,9 @@ Run the one-time tooling setup, then record per clip:
 
 ```bash
 bash /abs/path/to/skills/using-my-presenter/assets/setup-tooling.sh
-# optional, for spoken narration (prints required exports):
-bash /abs/path/to/skills/using-my-presenter/assets/setup-voiceover.sh
+# only if narration was requested AND VoiceStudio isn't installed yet
+# (after user confirmation — see the voiceover availability ladder):
+bash /abs/path/to/skills/using-my-presenter/assets/setup-voicestudio.sh
 ```
 
 ```bash
@@ -125,12 +126,12 @@ The flow file exports `default async function runFlow(page, h)`:
 | Helper | Purpose |
 |--------|---------|
 | `h.goto(path)` | navigate (relative resolves against `--base`), waits networkidle |
-| `h.caption(text)` | subtitle/narration text; spoken when `--voiceover` |
+| `h.caption(text)` | subtitle/narration text; spoken when `--voiceover` (held until the previous narration finishes) |
 | `h.glideClick(locator)` | glide cursor to element, then click (opts `{ms}`) |
 | `h.glideTo(locator)` | glide without clicking (opts `{ms}`) |
 | `h.highlight(locator)` | dim page + glowing ring on element (opts `{padding}`) |
 | `h.clearHighlight()` | hide spotlight |
-| `h.explain(locator, text)` | glide + highlight + caption + read-pause (opts `{ms, read}`) |
+| `h.explain(locator, text)` | glide + highlight + caption + read-pause (opts `{ms, read}`); never moves focus mid-narration |
 | `h.type(locator, text)` | realistic per-key typing |
 | `h.shot(label)` | numbered milestone screenshot `NNN_label.png` |
 | `h.sleep(ms)` | pause for viewers |
@@ -156,9 +157,8 @@ Keep the recorder, browser, and TTS work inside bounds so nothing freezes or OOM
 - The `.mp4` composites the recording as a floating browser window (macOS chrome bar, live-URL pill, rounded corners, drop shadow) on a white canvas — composited in post, never covering content. Disable with `--no-chrome` / `DEMO_NO_CHROME=1`.
 - Subtitles burn below the browser window in post; if ffmpeg is unavailable the recorder falls back to an in-page caption lane so `.webm` keeps captions.
 - Off-screen targets scroll into view with smooth scrolling before the cursor glides; the spotlight auto-clears before every navigation.
-- Flags also settable via env: `DEMO_BASE / DEMO_FLOW / DEMO_OUT / DEMO_NAME / DEMO_WIDTH / DEMO_HEIGHT / DEMO_FPS / DEMO_NO_CHROME / DEMO_HEADED / DEMO_VOICEOVER / DEMO_TTS_* / DEMO_AUDIO_* / DEMO_MODULES`. Run with no `--flow` for a placeholder open-only clip to verify setup.
+- Flags also settable via env: `DEMO_BASE / DEMO_FLOW / DEMO_OUT / DEMO_NAME / DEMO_WIDTH / DEMO_HEIGHT / DEMO_FPS / DEMO_NO_CHROME / DEMO_HEADED / DEMO_VOICEOVER / DEMO_VO_* / VS_* / DEMO_AUDIO_* / DEMO_MODULES`. Run with no `--flow` for a placeholder open-only clip to verify setup.
 - After a successful record, the raw capture and intermediate `.webm` are auto-cleaned — only `.mp4` + `screenshots/` remain.
-- `piper-tts==1.7.0` is GPL-3.0-or-later; the `en_US-lessac-high` voice has its own model-card terms — review before distribution.
 
 ## Deliverable Structure
 
@@ -197,7 +197,6 @@ Report `BLOCKED` (per feature, continuing others) when:
 - the server can't be started/reached, or the feature/route can't be located
 - required auth or demo credentials are unavailable
 - a real product bug blocks the flow and can't be safely fixed
-- voiceover was requested but VoiceStudio can't produce audio and no fallback local TTS engine or `ffmpeg-static` is available
 - no browser tooling can be installed (no Playwright, no network)
 
 State the exact blocker and the minimum next action for that feature.

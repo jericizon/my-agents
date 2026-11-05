@@ -37,7 +37,9 @@
  *   --fps <n>        Output constant frame rate for .mp4 (env DEMO_FPS;   default 60)
  *   --no-chrome      Skip the macOS-style browser chrome mockup on the .mp4 (env DEMO_NO_CHROME)
  *   --headed         Run with a visible browser (needs a display; default headless)
- *   --voiceover      Generate TTS voiceover from h.caption() calls
+ *   --voiceover      Generate spoken narration per caption via VoiceStudio
+ *                    (OpenAI-compatible API, default http://localhost:3900).
+ *                    Disregarded silently when VoiceStudio is unreachable.
  *
  * THE FLOW FILE (see example-flow.mjs next to this file):
  *   export default async function runFlow(page, h) { ... }
@@ -59,7 +61,7 @@ import {
   generateVoiceoverSegments,
   isVoiceoverEnabled,
   muxVoiceover,
-  resolveTtsEngine,
+  resolveVoiceoverEngine,
   verifyAudioStream,
 } from './voiceover.mjs';
 
@@ -132,18 +134,6 @@ try {
   ffmpegPath = requireFrom('ffmpeg-static');
   if (!ffmpegPath || !existsSync(ffmpegPath)) ffmpegPath = null;
 } catch { ffmpegPath = null; }
-if (CONFIG.VOICEOVER) {
-  try {
-    voiceoverEngine = resolveTtsEngine();
-  } catch (e) {
-    console.error(`[recorder] Voiceover unavailable: ${e.message}`);
-    process.exit(1);
-  }
-}
-if (CONFIG.VOICEOVER && !ffmpegPath) {
-  console.error('[recorder] Voiceover unavailable: ffmpeg-static is required but not installed.');
-  process.exit(1);
-}
 // When ffmpeg can post-process, captions burn below the browser window; otherwise the
 // in-page caption lane keeps captions visible in the raw .webm deliverable.
 const BURN_CAPTIONS = !!ffmpegPath;
@@ -377,6 +367,20 @@ async function loadFlow(flowPath) {
 
 // ── Engine ────────────────────────────────────────────────────────────────────
 (async () => {
+  // VoiceStudio is the only narration engine. When it is unreachable (or ffmpeg
+  // is missing) the voiceover request is disregarded: the clip records silently.
+  if (CONFIG.VOICEOVER) {
+    voiceoverEngine = await resolveVoiceoverEngine();
+    if (!voiceoverEngine) {
+      console.warn('[recorder] VoiceStudio unreachable — disregarding the voiceover request; recording without narration.');
+      CONFIG.VOICEOVER = false;
+    }
+  }
+  if (CONFIG.VOICEOVER && !ffmpegPath) {
+    console.warn('[recorder] ffmpeg-static not installed — disregarding the voiceover request; recording without narration.');
+    CONFIG.VOICEOVER = false;
+  }
+
   const runFlow = await loadFlow(CONFIG.FLOW);
 
   const videoDir = path.join(CONFIG.OUT_DIR, 'video');
@@ -417,6 +421,19 @@ async function loadFlow(flowPath) {
   const recordingStartedAt = process.hrtime.bigint();
   const captionTimeline = [];
   const elapsedMs = () => Number(process.hrtime.bigint() - recordingStartedAt) / 1e6;
+  // Narration pacing (voiceover only): estimate when the active caption's speech
+  // ends and hold the next caption/spotlight until then, so a new beat never
+  // starts — and two narrations never overlap — while one is still playing.
+  // The mixer additionally fits every segment inside its caption window.
+  const VO_CPS = Math.max(4, Number(process.env.DEMO_VO_CPS) || 20); // spoken chars/sec
+  const VO_BASE_MS = Math.max(0, Number(process.env.DEMO_VO_BASE_MS) || 500);
+  const VO_GAP_MS = Math.max(0, Number(process.env.DEMO_VO_GAP_MS) || 350);
+  let narrationEndsAt = 0; // elapsedMs timestamp the active caption's speech ends
+  const settleNarration = async () => {
+    if (!CONFIG.VOICEOVER) return;
+    const waitMs = narrationEndsAt + VO_GAP_MS - elapsedMs();
+    if (waitMs > 0) await sleep(waitMs);
+  };
   // URL timeline for the chrome pill: poll page.url() so both full navigations and
   // SPA route changes (pushState) are captured with wall-clock timing.
   const urlTimeline = [];
@@ -479,7 +496,10 @@ async function loadFlow(flowPath) {
     },
     caption: async (t) => {
       const text = String(t ?? '');
-      captionTimeline.push({ text, at: elapsedMs() });
+      await settleNarration(); // previous narration finishes before this caption lands
+      const at = elapsedMs();
+      captionTimeline.push({ text, at });
+      if (text.trim()) narrationEndsAt = at + VO_BASE_MS + (text.trim().length / VO_CPS) * 1000;
       await page.evaluate((x) => {
         const cap = document.getElementById('__demoCaptionText');
         if (cap) { cap.textContent = x; cap.style.opacity = x ? '1' : '0'; }
@@ -514,6 +534,7 @@ async function loadFlow(flowPath) {
     // Compound "explain this element" beat: glide cursor + spotlight + subtitle + read pause.
     // Use this to walk every meaningful control on a page, not only the ones acted on.
     explain: async (loc, text, { ms, read = 1800 } = {}) => {
+      await settleNarration(); // never move focus while a previous narration plays
       await h.glideTo(loc, { ms });
       await h.highlight(loc);
       await h.caption(text);
@@ -534,6 +555,7 @@ async function loadFlow(flowPath) {
   let err = null;
   try { await runFlow(page, h); }
   catch (e) { err = e; console.error('FLOW_ERROR', e); }
+  await settleNarration(); // let the final caption's narration play out before cutting
   if (urlPoller) clearInterval(urlPoller);
 
   const video = page.video();
@@ -606,10 +628,11 @@ async function loadFlow(flowPath) {
     if (CONFIG.VOICEOVER) {
       const voiceoverDir = path.join(CONFIG.OUT_DIR, '.voiceover');
       try {
-        const audioFiles = generateVoiceoverSegments({
+        const audioFiles = await generateVoiceoverSegments({
           captions: captionTimeline,
           engine: voiceoverEngine,
           outputDir: voiceoverDir,
+          ffmpeg: ffmpegPath,
         });
         muxVoiceover({
           ffmpeg: ffmpegPath,
