@@ -7,7 +7,7 @@ description: Use when the user wants a client-presentable or stakeholder demo wa
 
 ## Overview
 
-**Verify first, then record.** Produce polished, client-presentable walkthrough videos of the already-running app: real Chromium recordings with a **visible animated mouse cursor**, **spotlight highlighting** on narrated elements, **subtitle captions burned below the browser window**, **milestone screenshots**, and `.mp4` output composited as a **macOS-style floating browser window** on a white canvas. Optional `--voiceover` narrates each caption through VoiceStudio, paced so every spoken segment finishes before the next step begins.
+**Verify first, then record.** Produce polished, client-presentable walkthrough videos of the already-running app: real Chromium recordings with a **visible animated mouse cursor**, **spotlight highlighting** on narrated elements, **subtitle captions burned below the browser window**, **milestone screenshots**, and `.mp4` output composited as a **macOS-style floating browser window** on a white canvas. Optional `--voiceover` narrates through VoiceStudio — audio-driven: each `h.narrate()` holds the scene for its measured speech duration, so a spoken line always finishes before the next step begins.
 
 Two scales, one pipeline:
 
@@ -58,7 +58,8 @@ Do NOT use when:
   3. Not installed → **ask the user whether to install VoiceStudio**; on confirmation run `assets/setup-voicestudio.sh` (latest `debpalash/VoiceStudio` GitHub release → `~/.local/bin`), then launch and poll.
   4. Still unreachable, install declined/failed → record **without** narration — the voiceover request is disregarded (the recorder does this itself); say so in the report. Never substitute another engine.
 - **One voice for the whole video.** Default `"The Companion"` profile (`VS_VOICE=fc52c689`); change only when the user names a different voice. `VS_SPEED` sets pace (default `1.2` — a normal conversational rate); `VS_MODEL`, `VS_SEED`, `VS_INSTRUCTIONS` tune the speech request.
-- **Pacing is automatic — narrations can never overlap.** With `--voiceover` the recorder holds each caption until its spoken segment has finished (estimated from caption length; tune via `DEMO_VO_CPS` / `DEMO_VO_BASE_MS` / `DEMO_VO_GAP_MS`) before the next caption appears or the spotlight moves — an element never takes focus while the previous explanation is still playing. The mixer also fits every segment inside its caption window as a backstop. Flows no longer need hand-timed `h.sleep` padding for speech.
+- **Audio-driven pacing — measured duration is authoritative.** `h.narrate(text)` generates its VoiceStudio segment on the spot, measures the REAL audio length, shows the caption, and holds the scene until the speech has finished. Gated helpers (`goto`, `glideTo`, `glideClick`, `highlight`, `caption`, `explain`) also wait, so cursor, spotlight, click, navigation, and captions never advance while narration plays. A long narration simply extends the scene — speech is never sped up, trimmed, or time-stretched to fit a window, and the mux contains no `atempo`/tempo filters (only `adelay` + `amix` + `loudnorm`). Tunables: `DEMO_VO_GAP_MS` (silence between narrations, default 350) and `DEMO_VO_TAIL_MS` (end-of-clip tail keeping the last word inside the capture, default 400).
+- **`h.narrate(text)` is the spoken helper; `h.caption(text)` is visual-only.** A caption alone does NOT produce speech or guarantee audio sync — use `narrate()` for every line that must be read aloud. `h.waitForNarration()` resolves once active narration finishes (no-op when idle); fixed `h.sleep()` padding is never a substitute for narration completion.
 - Verify `AUDIO_STREAM=` in recorder logs and probe the final file (`ffmpeg -i <video> -map 0:a:0 -f null -`).
 - The mux applies single-pass EBU R128 loudness normalization (`-16 LUFS`, `-1.5 dBTP`, `7 LU`). Override only via `DEMO_AUDIO_TARGET_LUFS` / `DEMO_AUDIO_MAX_TRUE_PEAK` / `DEMO_AUDIO_TARGET_LRA` when the delivery platform requires it — no guessed `dynaudnorm`/volume boosts.
 - VoiceStudio is synthetic TTS — natural-sounding but not human. Never claim human/non-AI narration; that claim requires a supplied human recording.
@@ -85,7 +86,7 @@ For each feature on the checklist, exercise the core flow: page loads clean, the
 
 ### Phase 4 — Author flow file(s)
 
-Copy `assets/example-flow.mjs` per feature and adapt: `h.explain(locator, text)` for every control from Phase 2 (including untouched ones), `h.caption(...)` before each action step, `h.glideClick`/`h.glideTo`/`h.type` for actions, `h.shot('<label>')` at milestones, `h.goto` downstream pages and explain the result, restore mutated data at the end. Captions ARE the script — short and client-friendly.
+Copy `assets/example-flow.mjs` per feature and adapt: `h.explain(locator, text)` for every control from Phase 2 (including untouched ones), `h.narrate(...)` before each action step (the spoken line IS the caption — short and client-friendly), `h.caption(...)` only for labels that must NOT be read aloud, `h.glideClick`/`h.glideTo`/`h.type` for actions, `h.shot('<label>')` at milestones, `h.goto` downstream pages and explain the result, restore mutated data at the end.
 
 ### Phase 5 — Record
 
@@ -126,22 +127,24 @@ The flow file exports `default async function runFlow(page, h)`:
 
 | Helper | Purpose |
 |--------|---------|
-| `h.goto(path)` | navigate (relative resolves against `--base`), waits networkidle |
-| `h.caption(text)` | subtitle/narration text; spoken when `--voiceover` (held until the previous narration finishes) |
-| `h.glideClick(locator)` | glide cursor to element, then click (opts `{ms}`) |
-| `h.glideTo(locator)` | glide without clicking (opts `{ms}`) |
-| `h.highlight(locator)` | dim page + glowing ring on element (opts `{padding}`) |
+| `h.goto(path)` | navigate (relative resolves against `--base`), waits networkidle; narration-gated |
+| `h.caption(text)` | visual subtitle only — NOT spoken; narration-gated |
+| `h.narrate(text)` | caption + spoken line; generates audio, holds the scene for its real duration, resolves when speech ends |
+| `h.waitForNarration()` | resolves once active narration finishes (no-op when idle) |
+| `h.glideClick(locator)` | glide cursor to element, then click (opts `{ms}`); narration-gated |
+| `h.glideTo(locator)` | glide without clicking (opts `{ms}`); narration-gated |
+| `h.highlight(locator)` | dim page + glowing ring on element (opts `{padding}`); narration-gated |
 | `h.clearHighlight()` | hide spotlight |
-| `h.explain(locator, text)` | glide + highlight + caption + read-pause (opts `{ms, read}`); never moves focus mid-narration |
+| `h.explain(locator, text)` | glide + highlight + narrate under `--voiceover` (caption + read-pause otherwise); opts `{ms, read}`; never moves focus mid-narration |
 | `h.type(locator, text)` | realistic per-key typing |
 | `h.shot(label)` | numbered milestone screenshot `NNN_label.png` |
-| `h.sleep(ms)` | pause for viewers |
+| `h.sleep(ms)` | pause for viewers (never a substitute for narration completion) |
 
 ## Resource Caps
 
 Keep the recorder, browser, and TTS work inside bounds so nothing freezes or OOMs mid-run:
 
-- **One thing at a time.** Never record two clips in parallel, never run concurrent TTS requests, and don't run VoiceStudio synthesis while a recording is in flight — generate the voiceover after the browser session for that clip closes (the mux happens post-record anyway).
+- **One thing at a time.** Never record two clips in parallel and never run concurrent TTS requests — narration generates inline at each `h.narrate()` during the recording (sequential by design, ~1–3s of synthesis per beat), and the mux happens post-record.
 - **Stay headless.** Headless Chromium is the default; `DEMO_HEADED` only when the user asks to watch — a headed browser costs meaningfully more.
 - **Output is always 1920×1080 at 60fps.** Never drop the frame rate to save resources — smoothness is the deliverable. If a constrained machine struggles, the fix is serializing work (above), not lowering quality.
 - **Bound every wait.** Server poll (30×2s), VoiceStudio API probe (~30×2s), navigation waits in flow files — every wait needs a timeout, never an unbounded block. `networkidle` waits are the usual freeze; prefer a bounded settle-wait in the flow.
@@ -188,7 +191,7 @@ Feature set:
 - one clean clip per feature under the session dir; login shown once only
 - every clip reviewed; faulty clips deleted and re-recorded; none contains a failed flow
 - screenshots at each milestone; `.mp4` present (or `.webm` fallback), always 60fps, size-optimized via CRF re-encode where beneficial
-- voiceover (if requested): verified audio stream, loudness-normalized, honest TTS disclosure
+- voiceover (if requested): verified audio stream, loudness-normalized, narration at natural speed with scenes held for measured duration, honest TTS disclosure
 - feature set: `MANIFEST.md` written, `BLOCKED` features noted
 
 ## Blocked Conditions

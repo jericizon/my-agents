@@ -37,13 +37,14 @@
  *   --fps <n>        Output constant frame rate for .mp4 (env DEMO_FPS;   default 60)
  *   --no-chrome      Skip the macOS-style browser chrome mockup on the .mp4 (env DEMO_NO_CHROME)
  *   --headed         Run with a visible browser (needs a display; default headless)
- *   --voiceover      Generate spoken narration per caption via VoiceStudio
+ *   --voiceover      Spoken narration for h.narrate()/h.explain() via VoiceStudio
  *                    (OpenAI-compatible API, default http://localhost:3900).
  *                    Disregarded silently when VoiceStudio is unreachable.
  *
  * THE FLOW FILE (see example-flow.mjs next to this file):
  *   export default async function runFlow(page, h) { ... }
  *   `h` provides: h.BASE, h.viewport, h.goto(pathOrUrl), h.caption(text),
+ *                 h.narrate(text), h.waitForNarration(),
  *                 h.glideClick(locator, opts), h.glideTo(locator, opts),
  *                 h.highlight(locator, opts), h.clearHighlight(), h.explain(locator, text, opts),
  *                 h.type(locator, text), h.shot(label), h.sleep(ms).
@@ -58,7 +59,7 @@ import { existsSync, mkdirSync, rmSync, readdirSync, copyFileSync, writeFileSync
 import path from 'path';
 import { pathToFileURL } from 'url';
 import {
-  generateVoiceoverSegments,
+  createNarrator,
   isVoiceoverEnabled,
   muxVoiceover,
   resolveVoiceoverEngine,
@@ -423,19 +424,27 @@ async function loadFlow(flowPath) {
   const recordingStartedAt = process.hrtime.bigint();
   const captionTimeline = [];
   const elapsedMs = () => Number(process.hrtime.bigint() - recordingStartedAt) / 1e6;
-  // Narration pacing (voiceover only): estimate when the active caption's speech
-  // ends and hold the next caption/spotlight until then, so a new beat never
-  // starts — and two narrations never overlap — while one is still playing.
-  // The mixer additionally fits every segment inside its caption window.
-  const VO_CPS = Math.max(4, Number(process.env.DEMO_VO_CPS) || 20); // spoken chars/sec
-  const VO_BASE_MS = Math.max(0, Number(process.env.DEMO_VO_BASE_MS) || 500);
+  // Audio-driven narration: h.narrate() generates its segment on the spot,
+  // measures the REAL duration, shows the caption, and holds the scene until
+  // the audio has finished — no estimated reading times, no tempo-fitting at
+  // mux. Gated helpers additionally wait so nothing advances mid-narration.
   const VO_GAP_MS = Math.max(0, Number(process.env.DEMO_VO_GAP_MS) || 350);
-  let narrationEndsAt = 0; // elapsedMs timestamp the active caption's speech ends
-  const settleNarration = async () => {
-    if (!CONFIG.VOICEOVER) return;
-    const waitMs = narrationEndsAt + VO_GAP_MS - elapsedMs();
-    if (waitMs > 0) await sleep(waitMs);
-  };
+  const VO_TAIL_MS = Math.max(0, Number(process.env.DEMO_VO_TAIL_MS) || 400);
+  const voiceoverDir = path.join(CONFIG.OUT_DIR, '.voiceover');
+  const setCaptionText = (text) => page.evaluate((x) => {
+    const cap = document.getElementById('__demoCaptionText');
+    if (cap) { cap.textContent = x; cap.style.opacity = x ? '1' : '0'; }
+  }, text).catch(() => {});
+  const narrator = createNarrator({
+    engine: CONFIG.VOICEOVER ? voiceoverEngine : null,
+    ffmpeg: ffmpegPath,
+    outputDir: voiceoverDir,
+    now: elapsedMs,
+    sleep,
+    gapMs: VO_GAP_MS,
+    onCaption: async (text, at) => { captionTimeline.push({ text, at }); await setCaptionText(text); },
+    onWarn: (m) => console.warn(m),
+  });
   // URL timeline for the chrome pill: poll page.url() so both full navigations and
   // SPA route changes (pushState) are captured with wall-clock timing.
   const urlTimeline = [];
@@ -493,26 +502,31 @@ async function loadFlow(flowPath) {
   const h = {
     page, BASE: CONFIG.BASE, viewport: CONFIG.VIEWPORT, sleep,
     goto: async (p = '/', opts = {}) => {
+      await narrator.waitForNarration(); // narration finishes before navigation
       await hideHighlight(); // never carry the spotlight across a navigation
       return page.goto(toUrl(p), { waitUntil: 'networkidle', ...opts });
     },
+    // Visual subtitle only — NOT spoken in voiceover mode; use h.narrate() for
+    // lines that must be read aloud.
     caption: async (t) => {
+      await narrator.waitForNarration(); // a caption never lands mid-narration
       const text = String(t ?? '');
-      await settleNarration(); // previous narration finishes before this caption lands
-      const at = elapsedMs();
-      captionTimeline.push({ text, at });
-      if (text.trim()) narrationEndsAt = at + VO_BASE_MS + (text.trim().length / VO_CPS) * 1000;
-      await page.evaluate((x) => {
-        const cap = document.getElementById('__demoCaptionText');
-        if (cap) { cap.textContent = x; cap.style.opacity = x ? '1' : '0'; }
-      }, text).catch(() => {});
+      captionTimeline.push({ text, at: elapsedMs() });
+      await setCaptionText(text);
     },
+    // Blocking spoken beat: generates the segment, measures its real duration,
+    // shows the caption, and resolves only after the narration has finished.
+    narrate: (t) => narrator.narrate(t),
+    // Resolves once any active narration has finished (no-op when idle).
+    waitForNarration: () => narrator.waitForNarration(),
     glideTo: async (loc, { ms } = {}) => {
+      await narrator.waitForNarration(); // cursor never moves mid-narration
       await hideHighlight(); // fade the old spotlight before the cursor moves on
       const b = await targetBox(loc);
       if (b) await glideCursor(b, ms);
     },
     glideClick: async (loc, { ms, settle = 350 } = {}) => {
+      await narrator.waitForNarration();
       await hideHighlight();
       const b = await targetBox(loc);
       if (b) { await glideCursor(b, ms); await sleep(settle); }
@@ -520,6 +534,7 @@ async function loadFlow(flowPath) {
     },
     // Draw the spotlight ring around an element's bounding rect (viewer focus cue).
     highlight: async (loc, { padding = 8 } = {}) => {
+      await narrator.waitForNarration(); // spotlight never moves mid-narration
       const b = await targetBox(loc);
       if (!b) return;
       await page.evaluate(({ x, y, w, hgt, pad }) => {
@@ -536,11 +551,11 @@ async function loadFlow(flowPath) {
     // Compound "explain this element" beat: glide cursor + spotlight + subtitle + read pause.
     // Use this to walk every meaningful control on a page, not only the ones acted on.
     explain: async (loc, text, { ms, read = 1800 } = {}) => {
-      await settleNarration(); // never move focus while a previous narration plays
+      await narrator.waitForNarration(); // never move focus while narration plays
       await h.glideTo(loc, { ms });
       await h.highlight(loc);
-      await h.caption(text);
-      await sleep(read);
+      if (CONFIG.VOICEOVER) await narrator.narrate(text); // spotlight holds through the speech
+      else { await h.caption(text); await sleep(read); }
     },
     type: (loc, text) => loc.pressSequentially(text, { delay: 75 }),
     // Capture a numbered milestone screenshot into <out>/screenshots/NNN_label.png
@@ -557,7 +572,8 @@ async function loadFlow(flowPath) {
   let err = null;
   try { await runFlow(page, h); }
   catch (e) { err = e; console.error('FLOW_ERROR', e); }
-  await settleNarration(); // let the final caption's narration play out before cutting
+  await narrator.waitForNarration(); // let the final narration play out before cutting
+  if (narrator.segments.length) await sleep(VO_TAIL_MS); // safety tail keeps the last word inside the capture
   if (urlPoller) clearInterval(urlPoller);
 
   const video = page.video();
@@ -628,19 +644,14 @@ async function loadFlow(flowPath) {
     }
 
     if (CONFIG.VOICEOVER) {
-      const voiceoverDir = path.join(CONFIG.OUT_DIR, '.voiceover');
       try {
-        const audioFiles = await generateVoiceoverSegments({
-          captions: captionTimeline,
-          engine: voiceoverEngine,
-          outputDir: voiceoverDir,
-          ffmpeg: ffmpegPath,
-        });
+        const segs = narrator.segments;
+        if (!segs.length) throw new Error('the flow produced no narration segments');
         muxVoiceover({
           ffmpeg: ffmpegPath,
           inputVideo: webm,
-          audioFiles,
-          captions: captionTimeline,
+          audioFiles: segs.map((s) => s.file),
+          captions: segs,
           output: target,
           format: 'webm',
           fps: CONFIG.FPS,
@@ -670,7 +681,9 @@ async function loadFlow(flowPath) {
       } finally {
         rmSync(voiceoverDir, { recursive: true, force: true });
       }
-    } else {
+    }
+    if (!out) {
+      // Silent path — no voiceover requested, or voiceover failed: keep the clip.
       copyFileSync(webm, target); // stable, predictable name
       webmOutput = target;
       out = target;

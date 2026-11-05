@@ -4,17 +4,24 @@
  *
  * Export a default async function `runFlow(page, h)`. `h` gives you helpers that make
  * the recording presentation-quality (visible cursor glide + subtitle captions +
- * milestone screenshots; pass --voiceover to read each caption aloud):
+ * milestone screenshots; pass --voiceover to read each h.narrate() line aloud):
  *
  *   h.BASE                      base URL passed on the CLI
  *   h.viewport                  { width, height }
  *   h.goto(pathOrUrl)           navigate (relative paths resolve against BASE), waits networkidle
- *   h.caption(text)             set the subtitle text in the dedicated bottom caption lane (pass '' to hide); this text is spoken in voiceover mode
+ *   h.caption(text)             set the subtitle text in the bottom caption lane (pass '' to hide);
+ *                               VISUAL ONLY — it is not spoken in voiceover mode
+ *   h.narrate(text)             caption + spoken narration in one call. With --voiceover it
+ *                               generates the segment, holds the scene for its REAL audio
+ *                               duration, and returns only when the speech has finished —
+ *                               nothing (cursor, spotlight, next beat) can advance mid-sentence.
+ *                               Without --voiceover it's just a caption + short read hold.
+ *   h.waitForNarration()        resolves once active narration finishes (no-op when idle)
  *   h.glideClick(locator, opts) glide the cursor to the element, then click  (opts: {ms, settle})
  *   h.glideTo(locator, opts)    glide the cursor to the element without clicking (opts: {ms} glide duration)
  *   h.highlight(locator, opts)  dim the page and draw the glowing accent ring around an element (opts: {padding})
  *   h.clearHighlight()          hide the spotlight ring and scrim
- *   h.explain(locator, text, opts) glide + highlight + caption + read-pause, in one call
+ *   h.explain(locator, text, opts) glide + highlight + narrate (voiceover) / caption + read-pause
  *                                (opts: {ms, read}) — use this to walk EVERY meaningful
  *                                control on the page, not only the ones the flow acts on
  *   h.type(locator, text)       realistic per-key typing
@@ -26,8 +33,9 @@
  * page.locator('[id="x"]'), etc. (CSS ids starting with a digit are invalid — use [id="123_foo"].)
  *
  * GUIDELINES
- * - Narrate EVERY step with h.caption so a non-technical client can follow along. In voiceover
- *   mode, every non-empty caption is also read aloud, so keep captions concise and complete.
+ * - Narrate EVERY step with h.narrate so a non-technical client can follow along — narrate
+ *   is the caption + the spoken line in one. Use h.caption only for visual labels that
+ *   should NOT be read aloud. Keep narration lines concise and complete.
  * - Explain the WHOLE page: use h.explain(locator, text) on every meaningful control, even
  *   ones this flow never interacts with (e.g. a "remember me" checkbox, a "forgot password"
  *   link) — the viewer should come away understanding the whole page, not just the 3 fields
@@ -44,7 +52,7 @@
  */
 export default async function runFlow(page, h) {
   // 1. Open the app
-  await h.caption('Welcome — this demo shows how to log in');
+  await h.narrate('Welcome — this demo shows how to log in');
   await h.goto('/login');
   await page.mouse.move(h.viewport.width / 2, h.viewport.height / 2, { steps: 10 });
   await h.sleep(1200);
@@ -75,25 +83,25 @@ export default async function runFlow(page, h) {
   await h.clearHighlight();
 
   // 3. Enter the email
-  await h.caption('Step 1 · Enter your email address');
+  await h.narrate('Step 1 · Enter your email address');
   await h.glideClick(page.getByLabel(/email/i));
   await h.type(page.getByLabel(/email/i), 'demo@example.com');
   await h.shot('email-entered');
 
   // 4. Enter the password
-  await h.caption('Step 2 · Enter your password');
+  await h.narrate('Step 2 · Enter your password');
   await h.glideClick(page.getByLabel(/password/i));
   await h.type(page.getByLabel(/password/i), 'demo-password');
   await h.shot('password-entered');
 
   // 5. Submit
-  await h.caption('Step 3 · Click "Sign in"');
+  await h.narrate('Step 3 · Click "Sign in"');
   await h.glideClick(page.getByRole('button', { name: /log ?in|sign ?in/i }));
   await page.waitForLoadState('networkidle');
   await h.sleep(800);
 
   // 6. Prove the result
-  await h.caption('Logged in successfully');
+  await h.narrate('Logged in successfully');
   await h.shot('logged-in');
   await h.sleep(1500);
 
@@ -102,7 +110,7 @@ export default async function runFlow(page, h) {
   // "publish page" action rather than a login — follow through to where the client actually
   // sees the result, instead of stopping at the editor's "Saved!" toast:
   //
-  //   await h.caption('Let\'s see the published page live on the site');
+  //   await h.narrate('Let\'s see the published page live on the site');
   //   await h.goto('/blog/my-new-post');           // the public-facing route it now lives at
   //   await h.explain(page.getByRole('heading', { level: 1 }),
   //     'This is the title we just entered in the editor — now live for visitors');

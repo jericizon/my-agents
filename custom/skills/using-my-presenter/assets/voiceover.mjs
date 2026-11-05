@@ -1,5 +1,5 @@
 import { execFileSync } from 'child_process';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, renameSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync, renameSync } from 'fs';
 import path from 'path';
 
 const VOICEOVER_TRUE_VALUES = new Set(['1', 'true', 'yes', 'on']);
@@ -19,8 +19,8 @@ const VOICESTUDIO_DEFAULTS = Object.freeze({
   seed: 42,
   instructions: 'warm, friendly, expressive narrator with natural conversational delivery',
 });
-const SEGMENT_END_GAP_MS = 350; // silence tail each segment must leave before the next caption
-const ATEMPO_MAX = 3; // tempo ceiling when squeezing one segment into its caption window
+const SEGMENT_END_GAP_MS = 350; // silence between the end of one narration and the next beat
+const SILENT_READ_MS = 1500; // on-screen read hold when a narrate() can't produce audio
 
 export function isVoiceoverEnabled(value) {
   if (typeof value === 'boolean') return value;
@@ -153,8 +153,7 @@ export function buildCaptionTimeline(captions) {
   });
 }
 
-// RIFF/WAVE duration in seconds — the mixer needs each segment's length to keep
-// it inside its caption window. Returns null for non-wav or unparseable files.
+// RIFF/WAVE duration in seconds. Returns null for non-wav or unparseable files.
 function wavDurationSeconds(file) {
   try {
     const buf = readFileSync(file);
@@ -165,7 +164,7 @@ function wavDurationSeconds(file) {
     while (offset + 8 <= buf.length) {
       const id = buf.toString('ascii', offset, offset + 4);
       const size = buf.readUInt32LE(offset + 4);
-      if (id === 'fmt ') byteRate = buf.readUInt32LE(offset + 12);
+      if (id === 'fmt ') byteRate = buf.readUInt32LE(offset + 16);
       if (id === 'data') { dataSize = size; break; }
       offset += 8 + size + (size % 2);
     }
@@ -183,6 +182,18 @@ function probeMediaDurationSeconds(ffmpeg, mediaPath, execFile = execFileSync) {
     const text = `${error.stderr || ''}${error.stdout || ''}`;
     const match = text.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
     if (match) return Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+  }
+  return null;
+}
+
+// Measured duration of a generated audio file in milliseconds — the value that
+// drives scene pacing. WAV header parse first, ffmpeg probe as fallback.
+export function audioDurationMs(file, { ffmpeg, execFile = execFileSync } = {}) {
+  const wav = wavDurationSeconds(file);
+  if (wav) return Math.round(wav * 1000);
+  if (ffmpeg) {
+    const probed = probeMediaDurationSeconds(ffmpeg, file, execFile);
+    if (probed) return Math.round(probed * 1000);
   }
   return null;
 }
@@ -228,46 +239,86 @@ export async function createTtsAudio(engine, text, outputPath, { fetchImpl = fet
     ], { stdio: 'ignore' });
     renameSync(tmp, outputPath);
   }
-  return outputPath;
+  // Real duration AFTER the fade/pad pass — the scene is held for exactly this.
+  return { file: outputPath, durationMs: audioDurationMs(outputPath, { ffmpeg, execFile }) };
 }
 
-export async function generateVoiceoverSegments({ captions, engine, outputDir, fetchImpl = fetch, execFile = execFileSync, ffmpeg } = {}) {
-  const timeline = buildCaptionTimeline(captions);
-  if (!timeline.length) throw new Error('Voiceover requested but the flow produced no non-empty captions.');
-  mkdirSync(outputDir, { recursive: true });
-  const files = [];
-  for (const [index, caption] of timeline.entries()) {
-    const file = path.join(outputDir, `${String(index + 1).padStart(3, '0')}.wav`);
-    await createTtsAudio(engine, caption.text, file, { fetchImpl, execFile, ffmpeg });
-    files.push(file);
+// Timing gate driven by MEASURED audio duration — never by estimates. The scene
+// may only advance once the active narration has actually finished (+ gap).
+export function createNarrationGate({ now, sleep, gapMs = SEGMENT_END_GAP_MS } = {}) {
+  let endsAt = -Infinity; // now() timestamp the active narration ends; -inf = idle
+  return {
+    async wait() {
+      const waitMs = endsAt + gapMs - now();
+      if (waitMs > 0) await sleep(waitMs);
+    },
+    // Mark narration as started at `at`; it will play for `durationMs` (measured).
+    start({ at, durationMs }) {
+      endsAt = at + durationMs;
+      return endsAt;
+    },
+  };
+}
+
+// Blocking narration engine for the recorder. narrate(text):
+//   1. waits for any previous narration to finish,
+//   2. generates the segment (audio asset on disk),
+//   3. measures its real duration,
+//   4. shows the caption (start == audio start),
+//   5. resolves only after the narration has actually ended.
+// onCaption(text, at) renders the subtitle; onWarn(msg) reports degradations.
+// With engine === null (voiceover off/unavailable) narrate degrades to a visual
+// caption + read hold and no TTS request is made.
+export function createNarrator({
+  engine = null, ffmpeg = null, outputDir, now, sleep,
+  gapMs = SEGMENT_END_GAP_MS, silentReadMs = SILENT_READ_MS,
+  onCaption = async () => {}, onWarn = () => {},
+  fetchImpl = fetch, execFile = execFileSync,
+} = {}) {
+  const gate = createNarrationGate({ now, sleep, gapMs });
+  const segments = []; // { text, at, file, durationMs } — audio timeline for the mux
+  let n = 0;
+
+  const visualBeat = async (text) => {
+    await onCaption(text, now());
+    await sleep(silentReadMs);
+  };
+
+  async function narrate(text) {
+    const clean = String(text ?? '').trim();
+    await gate.wait(); // previous narration always finishes before this beat
+    if (!clean || !engine) { await visualBeat(clean); return; }
+    const file = path.join(outputDir, `${String(++n).padStart(3, '0')}.wav`);
+    let seg = null;
+    try {
+      seg = await createTtsAudio(engine, clean, file, { fetchImpl, execFile, ffmpeg });
+    } catch (e) {
+      onWarn(`[narrator] TTS failed for "${clean.slice(0, 48)}": ${e.message} — visual caption instead`);
+    }
+    if (!seg || !seg.durationMs) {
+      if (seg) { try { unlinkSync(seg.file); } catch { /* keep for debugging */ } }
+      if (seg) onWarn('[narrator] could not measure audio duration — segment dropped (never estimated)');
+      await visualBeat(clean);
+      return;
+    }
+    const at = now(); // caption appears exactly when the narration starts
+    await onCaption(clean, at);
+    segments.push({ text: clean, at, file, durationMs: seg.durationMs });
+    gate.start({ at, durationMs: seg.durationMs });
+    await gate.wait(); // hold the scene for the FULL measured duration
   }
-  return files;
+
+  return { narrate, waitForNarration: gate.wait, segments };
 }
 
-export function buildAudioMixFilter(captions, env = process.env, inputOffset = 0, segmentDurations = [], totalDurationMs = null) {
+export function buildAudioMixFilter(captions, env = process.env, inputOffset = 0) {
   const timeline = buildCaptionTimeline(captions);
   if (!timeline.length) throw new Error('Cannot build an audio mix without captions.');
   const base = 1 + inputOffset;
-  const endGapMs = readConfiguredNumber(env, 'DEMO_VO_GAP_MS', SEGMENT_END_GAP_MS, {
-    min: 0,
-    max: 10000,
-    rangeDescription: 'between 0 and 10000',
-  });
-  const delayed = timeline.map((caption, index) => {
-    const at = Math.max(0, Math.round(caption.at));
-    const nextAt = index + 1 < timeline.length
-      ? timeline[index + 1].at
-      : (totalDurationMs ?? Number.POSITIVE_INFINITY);
-    const availableSec = (nextAt - at - endGapMs) / 1000;
-    const durationSec = Number(segmentDurations[index]);
-    // Squeeze a segment that would outlast its caption window so narration
-    // never overlaps the next caption's narration.
-    let pre = '';
-    if (Number.isFinite(durationSec) && durationSec > 0 && availableSec > 0.25 && durationSec > availableSec) {
-      pre = `atempo=${Math.min(durationSec / availableSec, ATEMPO_MAX).toFixed(3)},`;
-    }
-    return `[${base + index}:a]${pre}adelay=${at}:all=1[a${index}]`;
-  });
+  // Segments are placed at their recorded caption times at ORIGINAL speed — the
+  // scene was already held for each narration's real duration, so no fitting,
+  // trimming, or tempo manipulation ever happens here.
+  const delayed = timeline.map((caption, index) => `[${base + index}:a]adelay=${Math.max(0, Math.round(caption.at))}:all=1[a${index}]`);
   const inputs = timeline.map((_, index) => `[a${index}]`).join('');
   delayed.push(`${inputs}amix=inputs=${timeline.length}:duration=longest:dropout_transition=0:normalize=1[aout]`);
   const normalization = resolveAudioNormalization(env);
@@ -275,7 +326,7 @@ export function buildAudioMixFilter(captions, env = process.env, inputOffset = 0
   return delayed.join(';');
 }
 
-export function buildMuxArgs({ inputVideo, audioFiles, captions, output, format, env = process.env, fps, videoChain, extraInputArgs = [], segmentDurations = [], totalDurationMs = null }) {
+export function buildMuxArgs({ inputVideo, audioFiles, captions, output, format, env = process.env, fps, videoChain, extraInputArgs = [] }) {
   if (!Array.isArray(audioFiles) || !audioFiles.length) {
     throw new Error('Cannot mux voiceover without generated audio segments.');
   }
@@ -283,7 +334,7 @@ export function buildMuxArgs({ inputVideo, audioFiles, captions, output, format,
   const args = ['-y', '-i', inputVideo, ...extraInputArgs];
   for (const audioFile of audioFiles) args.push('-i', audioFile);
   const extraCount = extraInputArgs.filter((arg) => arg === '-i').length;
-  const audioFilter = buildAudioMixFilter(captions, env, extraCount, segmentDurations, totalDurationMs);
+  const audioFilter = buildAudioMixFilter(captions, env, extraCount);
   let videoMap = '0:v:0';
   let filter = audioFilter;
   if (format === 'mp4' && videoChain) {
@@ -310,12 +361,8 @@ export function buildMuxArgs({ inputVideo, audioFiles, captions, output, format,
 
 export function muxVoiceover({ ffmpeg, inputVideo, audioFiles, captions, output, format, env = process.env, execFile = execFileSync, fps, videoChain, extraInputArgs = [], cwd }) {
   mkdirSync(path.dirname(output), { recursive: true });
-  const segmentDurations = audioFiles.map((file) => wavDurationSeconds(file));
-  const videoSeconds = probeMediaDurationSeconds(ffmpeg, inputVideo, execFile);
-  const totalDurationMs = videoSeconds ? videoSeconds * 1000 : null;
   const args = buildMuxArgs({
     inputVideo, audioFiles, captions, output, format, env, fps, videoChain, extraInputArgs,
-    segmentDurations, totalDurationMs,
   });
   try {
     execFile(ffmpeg, args, cwd ? { stdio: 'ignore', cwd } : { stdio: 'ignore' });
