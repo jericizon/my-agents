@@ -40,6 +40,10 @@
  *   --voiceover      Spoken narration for h.narrate()/h.explain() via VoiceStudio
  *                    (OpenAI-compatible API, default http://localhost:3900).
  *                    Disregarded silently when VoiceStudio is unreachable.
+ *                    Adds a subtle ambient background-music bed automatically.
+ *   --music <mode>   Background music: 'none' to disable, a file path for a
+ *                    custom bed, or 'auto' (default with --voiceover) for the
+ *                    bundled ambient bed. (env DEMO_MUSIC)
  *
  * THE FLOW FILE (see example-flow.mjs next to this file):
  *   export default async function runFlow(page, h) { ... }
@@ -62,6 +66,7 @@ import {
   createNarrator,
   isVoiceoverEnabled,
   muxVoiceover,
+  resolveMusicPlan,
   resolveVoiceoverEngine,
   verifyAudioStream,
 } from './voiceover.mjs';
@@ -383,6 +388,16 @@ async function loadFlow(flowPath) {
     console.warn('[recorder] ffmpeg-static not installed — disregarding the voiceover request; recording without narration.');
     CONFIG.VOICEOVER = false;
   }
+  // Background music lives inside the voiceover mix — only meaningful when
+  // narration is on. --music none disables it; --music <file> swaps the bed.
+  const musicPlan = resolveMusicPlan({
+    voiceover: CONFIG.VOICEOVER,
+    music: args.music ?? process.env.DEMO_MUSIC,
+    warn: (m) => console.warn(m),
+  });
+  if (CONFIG.VOICEOVER && musicPlan.enabled) {
+    console.log(`[recorder] background music: ${musicPlan.source.kind === 'file' ? musicPlan.source.path : 'bundled ambient bed'} · gain ${musicPlan.gain}`);
+  }
 
   const runFlow = await loadFlow(CONFIG.FLOW);
 
@@ -655,6 +670,7 @@ async function loadFlow(flowPath) {
           output: target,
           format: 'webm',
           fps: CONFIG.FPS,
+          music: musicPlan,
         });
         verifyAudioStream({ ffmpeg: ffmpegPath, mediaPath: target });
         webmOutput = target;

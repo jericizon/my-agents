@@ -22,6 +22,50 @@ const VOICESTUDIO_DEFAULTS = Object.freeze({
 const SEGMENT_END_GAP_MS = 350; // silence between the end of one narration and the next beat
 const SILENT_READ_MS = 1500; // on-screen read hold when a narrate() can't produce audio
 
+// Bundled background bed: a deterministic ambient pad synthesized by ffmpeg's
+// aevalsrc at mux time — a Dm-add9 voicing of detuned partials with slow
+// breathing LFOs. No external file, no licensing concerns, always seamless.
+export const AMBIENT_BED_EXPR = '0.24*sin(2*PI*146.83*t)*(0.8+0.2*sin(2*PI*0.05*t))'
+  + '+0.18*sin(2*PI*220*t)*(0.8+0.2*sin(2*PI*0.07*t+1))'
+  + '+0.14*sin(2*PI*261.63*t)*(0.75+0.25*sin(2*PI*0.09*t+2))'
+  + '+0.12*sin(2*PI*349.23*t)*(0.7+0.3*sin(2*PI*0.11*t+3))'
+  + '+0.09*sin(2*PI*440*t)*(0.7+0.3*sin(2*PI*0.13*t+4))'
+  + '+0.045*sin(2*PI*880*t)*(0.65+0.35*sin(2*PI*0.06*t+5))';
+const MUSIC_DEFAULTS = Object.freeze({
+  gain: 0.25,
+  fadeInSec: 1.5,
+  fadeOutSec: 2,
+  duck: Object.freeze({ threshold: 0.02, ratio: 6, attack: 20, release: 600 }),
+});
+
+// Resolves the background-music plan from --music / DEMO_MUSIC. Music exists
+// only inside the voiceover mix — with voiceover off there is no audio chain,
+// so the plan is always disabled. `music`: 'none' | 'auto' | true | <path>.
+export function resolveMusicPlan({ voiceover, music, env = process.env, existsImpl = existsSync, warn = () => {} } = {}) {
+  if (!voiceover) return { enabled: false };
+  const raw = (music === undefined || music === true || music === null) ? 'auto' : String(music).trim();
+  if (/^none$/i.test(raw)) return { enabled: false };
+  let source = { kind: 'bed' };
+  if (raw && !/^auto$/i.test(raw)) {
+    if (existsImpl(raw)) source = { kind: 'file', path: raw };
+    else warn(`[recorder] music file not found: ${raw} — using the bundled ambient bed`);
+  }
+  return {
+    enabled: true,
+    source,
+    gain: readConfiguredNumber(env, 'DEMO_MUSIC_GAIN', MUSIC_DEFAULTS.gain, {
+      min: 0, max: 2, rangeDescription: 'between 0 and 2',
+    }),
+    fadeInSec: readConfiguredNumber(env, 'DEMO_MUSIC_FADE_IN', MUSIC_DEFAULTS.fadeInSec, {
+      min: 0, max: 30, rangeDescription: 'between 0 and 30',
+    }),
+    fadeOutSec: readConfiguredNumber(env, 'DEMO_MUSIC_FADE_OUT', MUSIC_DEFAULTS.fadeOutSec, {
+      min: 0, max: 30, rangeDescription: 'between 0 and 30',
+    }),
+    duck: { ...MUSIC_DEFAULTS.duck },
+  };
+}
+
 export function isVoiceoverEnabled(value) {
   if (typeof value === 'boolean') return value;
   return VOICEOVER_TRUE_VALUES.has(String(value || '').trim().toLowerCase());
@@ -311,7 +355,7 @@ export function createNarrator({
   return { narrate, waitForNarration: gate.wait, segments };
 }
 
-export function buildAudioMixFilter(captions, env = process.env, inputOffset = 0) {
+export function buildAudioMixFilter(captions, env = process.env, inputOffset = 0, music = null, totalSec = null) {
   const timeline = buildCaptionTimeline(captions);
   if (!timeline.length) throw new Error('Cannot build an audio mix without captions.');
   const base = 1 + inputOffset;
@@ -322,19 +366,53 @@ export function buildAudioMixFilter(captions, env = process.env, inputOffset = 0
   const inputs = timeline.map((_, index) => `[a${index}]`).join('');
   delayed.push(`${inputs}amix=inputs=${timeline.length}:duration=longest:dropout_transition=0:normalize=1[aout]`);
   const normalization = resolveAudioNormalization(env);
-  delayed.push(`[aout]aresample=48000,loudnorm=I=${normalization.integratedLoudness}:TP=${normalization.maxTruePeak}:LRA=${normalization.loudnessRange}:linear=false[anorm]`);
+  const norm = `aresample=48000,loudnorm=I=${normalization.integratedLoudness}:TP=${normalization.maxTruePeak}:LRA=${normalization.loudnessRange}:linear=false[anorm]`;
+  if (!music?.enabled) {
+    delayed.push(`[aout]${norm}`);
+    return delayed.join(';');
+  }
+  if (!(Number(totalSec) > 0)) {
+    throw new Error('Background music requires the total demo duration for trim/fades.');
+  }
+  // Normalize the narration bus FIRST — running loudnorm over the finished mix
+  // would pump up the quiet music-only gaps toward the speech target and
+  // erase the intended level gap between narration and bed.
+  delayed.push(`[aout]${norm}`);
+  // Music input sits right after the narration segment inputs. The bed is
+  // trimmed to the clip length, warmed up (rumble/hiss out), faded in/out, and
+  // sidechain-ducked by the narration bus — subtle under speech, slightly more
+  // present in the pauses. No tempo manipulation anywhere.
+  const musicIndex = base + timeline.length;
+  const fadeOutStart = Math.max(0, totalSec - music.fadeOutSec);
+  delayed.push(
+    `[${musicIndex}:a]atrim=duration=${totalSec.toFixed(2)},highpass=f=70,lowpass=f=1700,`
+    + `aecho=0.7:0.9:60|100:0.22|0.15,volume=${music.gain},`
+    + `afade=t=in:st=0:d=${music.fadeInSec},afade=t=out:st=${fadeOutStart.toFixed(2)}:d=${music.fadeOutSec}[mus]`,
+  );
+  const d = music.duck;
+  // sidechaincompress stops when the shorter input ends — pad the key with
+  // silence to clip length so the music survives past the last narration.
+  delayed.push('[anorm]asplit=2[vmix][vkeypre]');
+  delayed.push(`[vkeypre]apad,atrim=duration=${totalSec.toFixed(2)}[vkey]`);
+  delayed.push(`[mus][vkey]sidechaincompress=threshold=${d.threshold}:ratio=${d.ratio}:attack=${d.attack}:release=${d.release}:makeup=1[mduck]`);
+  delayed.push('[vmix][mduck]amix=inputs=2:duration=longest:normalize=0[amixed]');
+  delayed.push('[amixed]alimiter=limit=0.95,aresample=48000[aoutmix]');
   return delayed.join(';');
 }
 
-export function buildMuxArgs({ inputVideo, audioFiles, captions, output, format, env = process.env, fps, videoChain, extraInputArgs = [] }) {
+export function buildMuxArgs({ inputVideo, audioFiles, captions, output, format, env = process.env, fps, videoChain, extraInputArgs = [], music = null, totalSec = null }) {
   if (!Array.isArray(audioFiles) || !audioFiles.length) {
     throw new Error('Cannot mux voiceover without generated audio segments.');
   }
   const frameRate = Math.max(1, Math.round(Number(fps ?? env.DEMO_FPS) || 60));
   const args = ['-y', '-i', inputVideo, ...extraInputArgs];
   for (const audioFile of audioFiles) args.push('-i', audioFile);
+  if (music?.enabled) {
+    if (music.source?.kind === 'file') args.push('-stream_loop', '-1', '-i', music.source.path);
+    else args.push('-f', 'lavfi', '-i', `aevalsrc=${AMBIENT_BED_EXPR}:s=48000:d=${Number(totalSec || 0).toFixed(2)}`);
+  }
   const extraCount = extraInputArgs.filter((arg) => arg === '-i').length;
-  const audioFilter = buildAudioMixFilter(captions, env, extraCount);
+  const audioFilter = buildAudioMixFilter(captions, env, extraCount, music, totalSec);
   let videoMap = '0:v:0';
   let filter = audioFilter;
   if (format === 'mp4' && videoChain) {
@@ -344,7 +422,7 @@ export function buildMuxArgs({ inputVideo, audioFiles, captions, output, format,
   args.push(
     '-filter_complex', filter,
     '-map', videoMap,
-    '-map', '[anorm]',
+    '-map', music?.enabled ? '[aoutmix]' : '[anorm]',
   );
 
   if (format === 'webm') {
@@ -359,10 +437,25 @@ export function buildMuxArgs({ inputVideo, audioFiles, captions, output, format,
   return args;
 }
 
-export function muxVoiceover({ ffmpeg, inputVideo, audioFiles, captions, output, format, env = process.env, execFile = execFileSync, fps, videoChain, extraInputArgs = [], cwd }) {
+export function muxVoiceover({ ffmpeg, inputVideo, audioFiles, captions, output, format, env = process.env, execFile = execFileSync, fps, videoChain, extraInputArgs = [], cwd, music = null }) {
   mkdirSync(path.dirname(output), { recursive: true });
+  let totalSec = null;
+  if (music?.enabled) {
+    // Music runs the whole clip: probe the video first, fall back to the last
+    // narration's measured end (+ safety tail) when the probe fails.
+    const videoSeconds = probeMediaDurationSeconds(ffmpeg, inputVideo, execFile);
+    if (videoSeconds) totalSec = videoSeconds;
+    else {
+      const lastEnd = (Array.isArray(captions) ? captions : [])
+        .reduce((max, c) => Math.max(max, (Number(c?.at) || 0) + (Number(c?.durationMs) || 0)), 0);
+      if (lastEnd > 0) totalSec = lastEnd / 1000 + 0.5;
+    }
+    if (!(totalSec > 0)) {
+      throw new Error('Background music needs a measurable clip duration (video probe failed and no segment lengths were recorded).');
+    }
+  }
   const args = buildMuxArgs({
-    inputVideo, audioFiles, captions, output, format, env, fps, videoChain, extraInputArgs,
+    inputVideo, audioFiles, captions, output, format, env, fps, videoChain, extraInputArgs, music, totalSec,
   });
   try {
     execFile(ffmpeg, args, cwd ? { stdio: 'ignore', cwd } : { stdio: 'ignore' });

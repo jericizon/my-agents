@@ -60,6 +60,7 @@ Do NOT use when:
 - **One voice for the whole video.** Default `"The Companion"` profile (`VS_VOICE=fc52c689`); change only when the user names a different voice. `VS_SPEED` sets pace (default `1.2` — a normal conversational rate); `VS_MODEL`, `VS_SEED`, `VS_INSTRUCTIONS` tune the speech request.
 - **Audio-driven pacing — measured duration is authoritative.** `h.narrate(text)` generates its VoiceStudio segment on the spot, measures the REAL audio length, shows the caption, and holds the scene until the speech has finished. Gated helpers (`goto`, `glideTo`, `glideClick`, `highlight`, `caption`, `explain`) also wait, so cursor, spotlight, click, navigation, and captions never advance while narration plays. A long narration simply extends the scene — speech is never sped up, trimmed, or time-stretched to fit a window, and the mux contains no `atempo`/tempo filters (only `adelay` + `amix` + `loudnorm`). Tunables: `DEMO_VO_GAP_MS` (silence between narrations, default 350) and `DEMO_VO_TAIL_MS` (end-of-clip tail keeping the last word inside the capture, default 400).
 - **`h.narrate(text)` is the spoken helper; `h.caption(text)` is visual-only.** A caption alone does NOT produce speech or guarantee audio sync — use `narrate()` for every line that must be read aloud. `h.waitForNarration()` resolves once active narration finishes (no-op when idle); fixed `h.sleep()` padding is never a substitute for narration completion.
+- **Background music is automatic with `--voiceover`** — no extra flag. The bundled bed is a deterministic ambient pad synthesized by ffmpeg at mux time (`aevalsrc`: a soft Dm-add9 voicing, breathing LFOs — no external file, no licensing issues, always seamless). It is trimmed to the clip duration, fades in 1.5s / out 2s, and is sidechain-ducked ~20dB+ under narration, becoming slightly more present in pauses. **`--music none`** disables it; **`--music /path/to/track.mp3`** substitutes a custom bed (missing file → warns and falls back to the bundled bed; custom files loop via `-stream_loop`). Tune level with `DEMO_MUSIC_GAIN` (linear, default 0.25) and fades with `DEMO_MUSIC_FADE_IN`/`DEMO_MUSIC_FADE_OUT`. Without `--voiceover` there is no audio chain — recordings stay silent as before; music is never added to a non-narrated clip. Troubleshooting: bed too loud/quiet → adjust `DEMO_MUSIC_GAIN`; voice drowned → lower gain below 0.2 before touching `VS_*`.
 - Verify `AUDIO_STREAM=` in recorder logs and probe the final file (`ffmpeg -i <video> -map 0:a:0 -f null -`).
 - The mux applies single-pass EBU R128 loudness normalization (`-16 LUFS`, `-1.5 dBTP`, `7 LU`). Override only via `DEMO_AUDIO_TARGET_LUFS` / `DEMO_AUDIO_MAX_TRUE_PEAK` / `DEMO_AUDIO_TARGET_LRA` when the delivery platform requires it — no guessed `dynaudnorm`/volume boosts.
 - VoiceStudio is synthetic TTS — natural-sounding but not human. Never claim human/non-AI narration; that claim requires a supplied human recording.
@@ -161,7 +162,7 @@ Keep the recorder, browser, and TTS work inside bounds so nothing freezes or OOM
 - The `.mp4` composites the recording as a floating browser window (macOS chrome bar, live-URL pill, rounded corners, drop shadow) on a white canvas — composited in post, never covering content. Disable with `--no-chrome` / `DEMO_NO_CHROME=1`.
 - Subtitles burn below the browser window in post; if ffmpeg is unavailable the recorder falls back to an in-page caption lane so `.webm` keeps captions.
 - Off-screen targets scroll into view with smooth scrolling before the cursor glides; the spotlight auto-clears before every navigation.
-- Flags also settable via env: `DEMO_BASE / DEMO_FLOW / DEMO_OUT / DEMO_NAME / DEMO_WIDTH / DEMO_HEIGHT / DEMO_FPS / DEMO_NO_CHROME / DEMO_HEADED / DEMO_VOICEOVER / DEMO_VO_* / VS_* / DEMO_AUDIO_* / DEMO_MODULES`. Run with no `--flow` for a placeholder open-only clip to verify setup.
+- Flags also settable via env: `DEMO_BASE / DEMO_FLOW / DEMO_OUT / DEMO_NAME / DEMO_WIDTH / DEMO_HEIGHT / DEMO_FPS / DEMO_NO_CHROME / DEMO_HEADED / DEMO_VOICEOVER / DEMO_MUSIC / DEMO_MUSIC_* / DEMO_VO_* / VS_* / DEMO_AUDIO_* / DEMO_MODULES`. Run with no `--flow` for a placeholder open-only clip to verify setup.
 - After a successful record, the raw capture and intermediate `.webm` are auto-cleaned — only `.mp4` + `screenshots/` remain.
 
 ## Deliverable Structure
@@ -191,7 +192,7 @@ Feature set:
 - one clean clip per feature under the session dir; login shown once only
 - every clip reviewed; faulty clips deleted and re-recorded; none contains a failed flow
 - screenshots at each milestone; `.mp4` present (or `.webm` fallback), always 60fps, size-optimized via CRF re-encode where beneficial
-- voiceover (if requested): verified audio stream, loudness-normalized, narration at natural speed with scenes held for measured duration, honest TTS disclosure
+- voiceover (if requested): verified audio stream, loudness-normalized, narration at natural speed with scenes held for measured duration, subtle ducked background bed (unless `--music none`), honest TTS disclosure
 - feature set: `MANIFEST.md` written, `BLOCKED` features noted
 
 ## Blocked Conditions
