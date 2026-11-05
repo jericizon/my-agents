@@ -36,6 +36,9 @@
  * - Narrate EVERY step with h.narrate so a non-technical client can follow along — narrate
  *   is the caption + the spoken line in one. Use h.caption only for visual labels that
  *   should NOT be read aloud. Keep narration lines concise and complete.
+ *   Prefer plain string literals for narrate/explain text: literal lines are
+ *   pre-synthesized before the camera rolls, so spoken lines land back-to-back.
+ *   Dynamic text still works but generates on the spot and can add a pause.
  * - Explain the WHOLE page: use h.explain(locator, text) on every meaningful control, even
  *   ones this flow never interacts with (e.g. a "remember me" checkbox, a "forgot password"
  *   link) — the viewer should come away understanding the whole page, not just the 3 fields

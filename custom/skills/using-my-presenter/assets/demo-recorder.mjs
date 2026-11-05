@@ -59,11 +59,12 @@
  */
 import { createRequire } from 'module';
 import { execFileSync } from 'child_process';
-import { existsSync, mkdirSync, rmSync, readdirSync, copyFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, rmSync, readdirSync, copyFileSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import {
   createNarrator,
+  extractNarrationTexts,
   isVoiceoverEnabled,
   muxVoiceover,
   resolveMusicPlan,
@@ -399,6 +400,42 @@ async function loadFlow(flowPath) {
     console.log(`[recorder] background music: ${musicPlan.source.kind === 'file' ? musicPlan.source.path : 'bundled ambient bed'} · gain ${musicPlan.gain}`);
   }
 
+  // Narration prefetch: pull the flow's literal narrate()/explain() lines and
+  // start synthesizing them NOW — before Chromium even launches — so the audio
+  // is already on disk when the flow reaches each beat. Generating inline at
+  // narrate() time (seconds of TTS round-trip per line) would land on the
+  // recorded timeline as dead air between spoken lines.
+  const VO_GAP_MS = Math.max(0, Number(process.env.DEMO_VO_GAP_MS) || 350);
+  const VO_TAIL_MS = Math.max(0, Number(process.env.DEMO_VO_TAIL_MS) || 400);
+  const voiceoverDir = path.join(CONFIG.OUT_DIR, '.voiceover');
+  const narrationLines = (() => {
+    if (!CONFIG.VOICEOVER || !CONFIG.FLOW) return [];
+    try {
+      return extractNarrationTexts(readFileSync(path.resolve(CONFIG.FLOW), 'utf8'));
+    } catch (e) {
+      console.warn(`[recorder] narration prefetch scan failed (${e.message}) — synthesizing on the spot instead`);
+      return [];
+    }
+  })();
+  // Captions route through this indirection: the narrator must exist before
+  // browser.launch (to overlap synthesis with setup), but the caption target
+  // only exists once the page does — wired below before the flow can run.
+  let captionSink = async () => {};
+  const narrator = createNarrator({
+    engine: CONFIG.VOICEOVER ? voiceoverEngine : null,
+    ffmpeg: ffmpegPath,
+    outputDir: voiceoverDir,
+    now: () => elapsedMs(), // called only inside runFlow — after the clock exists
+    sleep,
+    gapMs: VO_GAP_MS,
+    onCaption: (text, at) => captionSink(text, at),
+    onWarn: (m) => console.warn(m),
+  });
+  narrator.prefetch(narrationLines);
+  if (narrationLines.length) {
+    console.log(`[recorder] pre-synthesizing ${narrationLines.length} narration line(s) in the background`);
+  }
+
   const runFlow = await loadFlow(CONFIG.FLOW);
 
   const videoDir = path.join(CONFIG.OUT_DIR, 'video');
@@ -428,6 +465,10 @@ async function loadFlow(flowPath) {
     await renderPng(frameDoc(winW, winH, CHROME_BAR_PX, WINDOW_RADIUS), framePng, winW, winH, true);
   }
 
+  // The camera rolls on context open — wait for the first spoken line to be
+  // generated so it starts on-camera instead of after an on-camera stall.
+  if (narrationLines.length) await narrator.ensure(narrationLines[0]);
+
   const context = await browser.newContext({
     viewport: CONFIG.VIEWPORT,
     recordVideo: { dir: videoDir, size: CONFIG.VIEWPORT },
@@ -439,27 +480,15 @@ async function loadFlow(flowPath) {
   const recordingStartedAt = process.hrtime.bigint();
   const captionTimeline = [];
   const elapsedMs = () => Number(process.hrtime.bigint() - recordingStartedAt) / 1e6;
-  // Audio-driven narration: h.narrate() generates its segment on the spot,
-  // measures the REAL duration, shows the caption, and holds the scene until
-  // the audio has finished — no estimated reading times, no tempo-fitting at
-  // mux. Gated helpers additionally wait so nothing advances mid-narration.
-  const VO_GAP_MS = Math.max(0, Number(process.env.DEMO_VO_GAP_MS) || 350);
-  const VO_TAIL_MS = Math.max(0, Number(process.env.DEMO_VO_TAIL_MS) || 400);
-  const voiceoverDir = path.join(CONFIG.OUT_DIR, '.voiceover');
+  // Audio-driven narration: h.narrate() measures the REAL duration, shows the
+  // caption, and holds the scene until the audio has finished — no estimated
+  // reading times, no tempo-fitting at mux. Gated helpers additionally wait so
+  // nothing advances mid-narration.
   const setCaptionText = (text) => page.evaluate((x) => {
     const cap = document.getElementById('__demoCaptionText');
     if (cap) { cap.textContent = x; cap.style.opacity = x ? '1' : '0'; }
   }, text).catch(() => {});
-  const narrator = createNarrator({
-    engine: CONFIG.VOICEOVER ? voiceoverEngine : null,
-    ffmpeg: ffmpegPath,
-    outputDir: voiceoverDir,
-    now: elapsedMs,
-    sleep,
-    gapMs: VO_GAP_MS,
-    onCaption: async (text, at) => { captionTimeline.push({ text, at }); await setCaptionText(text); },
-    onWarn: (m) => console.warn(m),
-  });
+  captionSink = async (text, at) => { captionTimeline.push({ text, at }); await setCaptionText(text); };
   // URL timeline for the chrome pill: poll page.url() so both full navigations and
   // SPA route changes (pushState) are captured with wall-clock timing.
   const urlTimeline = [];
@@ -589,6 +618,7 @@ async function loadFlow(flowPath) {
   catch (e) { err = e; console.error('FLOW_ERROR', e); }
   await narrator.waitForNarration(); // let the final narration play out before cutting
   if (narrator.segments.length) await sleep(VO_TAIL_MS); // safety tail keeps the last word inside the capture
+  narrator.stop(); // abandon leftover prefetch — in-flight TTS must not outlive the run
   if (urlPoller) clearInterval(urlPoller);
 
   const video = page.video();

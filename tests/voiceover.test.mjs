@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'child_process';
 import { createRequire } from 'module';
-import { mkdtempSync, writeFileSync, rmSync, existsSync } from 'fs';
+import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import {
@@ -11,6 +11,7 @@ import {
   buildMuxArgs,
   createNarrationGate,
   createNarrator,
+  extractNarrationTexts,
 } from '../custom/skills/using-my-presenter/assets/voiceover.mjs';
 
 // PCM16 mono WAV of exactly `seconds` — enough RIFF structure for the parser.
@@ -294,5 +295,210 @@ test('mixed audio keeps real segment durations end-to-end', { skip: !ffmpegBin &
     const dur = audioDurationMs(outWav);
     // expected: last segment ends at 2700+3000=5700ms — full tail present, ±150ms codec slack
     assert.ok(dur > 5550 && dur < 6000, `mixed duration ${dur}ms — expected ~5700ms`);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── extractNarrationTexts: prefetch scan of the flow source ─────────────────
+test('extracts narrate() arg0 and explain() arg1 in source order, deduped', () => {
+  const src = `
+    await h.narrate('Welcome');
+    await h.explain(page.getByLabel(/email/i), 'Your account email');
+    await h.narrate('Step 1');
+    await h.narrate('Welcome'); // repeat — deduped
+    await h.caption('visual only — not spoken');
+  `;
+  assert.deepEqual(extractNarrationTexts(src), ['Welcome', 'Your account email', 'Step 1']);
+});
+
+test('skips calls inside comments and strings', () => {
+  const src = `
+    await h.narrate('real line');
+    //   await h.narrate('commented out');
+    /* await h.explain(x, 'block commented'); */
+    const s = "h.narrate('inside a string')";
+    await h.narrate('second');
+  `;
+  assert.deepEqual(extractNarrationTexts(src), ['real line', 'second']);
+});
+
+test('handles escapes, double quotes, template literals and concatenation', () => {
+  const src = `
+    await h.narrate('it\\'s masked as you type');
+    await h.narrate("double quoted");
+    await h.narrate(\`static template\`);
+    await h.narrate('part one' + ' part two');
+    await h.narrate(\`dynamic \${count} template\`);
+  `;
+  assert.deepEqual(extractNarrationTexts(src), [
+    "it's masked as you type",
+    'double quoted',
+    'static template',
+    'part one part two',
+  ]);
+});
+
+test('skips non-literal arguments instead of evaluating them', () => {
+  let sideEffect = 0;
+  globalThis.__narrateSideEffect = () => { sideEffect += 1; return 'nope'; };
+  const src = `
+    await h.narrate(getLine());
+    await h.narrate(variable);
+    await h.narrate(__narrateSideEffect());
+    await h.explain(page.getByText(/ok/i));
+    await h.narrate('literal survives');
+  `;
+  assert.deepEqual(extractNarrationTexts(src), ['literal survives']);
+  assert.equal(sideEffect, 0); // extraction must never execute flow expressions
+});
+
+test('locator args with regexes and commas do not break explain() parsing', () => {
+  const src = `
+    await h.explain(page.getByRole('link', { name: /forgot password/i }), 'Starts the reset flow');
+    await h.explain(page.locator('[data-x="a,b"]'), 'Comma in selector');
+    await h.explain(page.getByLabel(/[,;]/), 'Regex with a comma');
+    await h.explain(page.getByText('multi, word'), 'Text with a comma');
+  `;
+  assert.deepEqual(extractNarrationTexts(src), [
+    'Starts the reset flow',
+    'Comma in selector',
+    'Regex with a comma',
+    'Text with a comma',
+  ]);
+});
+
+test('extracts from the bundled example flow including conditionals', () => {
+  const example = readFileSync(
+    path.join(path.dirname(new URL(import.meta.url).pathname),
+      '../custom/skills/using-my-presenter/assets/example-flow.mjs'),
+    'utf8',
+  );
+  const lines = extractNarrationTexts(example);
+  assert.ok(lines.includes('Welcome — this demo shows how to log in'));
+  assert.ok(lines.includes('This field is your account email — the one you signed up with'));
+  assert.ok(lines.includes('Your password goes here — it\'s masked as you type for privacy'));
+  assert.ok(lines.includes('Step 3 · Click "Sign in"'));
+  // the commented-out downstream pattern must NOT be extracted
+  assert.ok(!lines.some((l) => l.includes('published page live')));
+  assert.ok(!lines.some((l) => l.includes('now live for visitors')));
+});
+
+// ── narration prefetch: synthesis leaves the recorded timeline ───────────────
+test('a prefetched line plays with zero on-camera synthesis stall', async () => {
+  const clock = virtualClock();
+  const dir = tmpDir();
+  const shown = [];
+  let fetches = 0;
+  try {
+    const narrator = createNarrator({
+      engine: fakeEngine,
+      outputDir: dir,
+      now: clock.now,
+      sleep: clock.sleep,
+      gapMs: 350,
+      fetchImpl: async () => { fetches += 1; await clock.sleep(2000); return new Response(wavBytes(1)); },
+      onCaption: (text, at) => { shown.push({ text, at }); },
+    });
+    narrator.prefetch(['ready line']);
+    await narrator.ensure('ready line'); // synthesis absorbed before recording
+    assert.equal(clock.time(), 2000);
+    assert.equal(fetches, 1);
+    await narrator.narrate('ready line');
+    // on camera it only held for the real 1s audio + gap — no 2s stall
+    assert.deepEqual(shown, [{ text: 'ready line', at: 2000 }]);
+    assert.equal(clock.time(), 2000 + 1000 + 350);
+    assert.equal(fetches, 1); // prefetched file reused — no second request
+    assert.equal(narrator.segments.length, 1);
+    narrator.stop();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a line not in the prefetch list still synthesizes on demand', async () => {
+  const clock = virtualClock();
+  const dir = tmpDir();
+  let fetches = 0;
+  try {
+    const narrator = createNarrator({
+      engine: fakeEngine,
+      outputDir: dir,
+      now: clock.now,
+      sleep: clock.sleep,
+      gapMs: 350,
+      fetchImpl: async () => { fetches += 1; await clock.sleep(500); return new Response(wavBytes(2)); },
+      onCaption: () => {},
+    });
+    narrator.prefetch(['other line']);
+    await narrator.narrate('dynamic line');
+    assert.equal(narrator.segments.length, 1);
+    assert.equal(narrator.segments[0].text, 'dynamic line');
+    narrator.stop();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('prefetch dedupes with narrate — one TTS request per unique line', async () => {
+  const clock = virtualClock();
+  const dir = tmpDir();
+  let fetches = 0;
+  try {
+    const narrator = createNarrator({
+      engine: fakeEngine,
+      outputDir: dir,
+      now: clock.now,
+      sleep: clock.sleep,
+      gapMs: 350,
+      fetchImpl: async () => { fetches += 1; await clock.sleep(100); return new Response(wavBytes(1)); },
+      onCaption: () => {},
+    });
+    narrator.prefetch(['same line']);
+    await narrator.narrate('same line');
+    await narrator.narrate('same line'); // same file, second beat — still one request
+    assert.equal(fetches, 1);
+    assert.equal(narrator.segments.length, 2);
+    narrator.stop();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a failed prefetch degrades to a visual caption, not a crash', async () => {
+  const clock = virtualClock();
+  const dir = tmpDir();
+  const captions = [];
+  const warnings = [];
+  try {
+    const narrator = createNarrator({
+      engine: fakeEngine,
+      outputDir: dir,
+      now: clock.now,
+      sleep: clock.sleep,
+      gapMs: 350,
+      fetchImpl: async () => { throw new Error('TTS down'); },
+      onCaption: (text, at) => { captions.push({ text, at }); },
+      onWarn: (m) => warnings.push(m),
+    });
+    narrator.prefetch(['doomed line']);
+    await narrator.narrate('doomed line');
+    assert.equal(narrator.segments.length, 0);
+    assert.deepEqual(captions, [{ text: 'doomed line', at: 0 }]);
+    assert.equal(clock.time(), 1500); // fell back to the silent read hold
+    assert.ok(warnings.length >= 1);
+    narrator.stop();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('stop() resolves pending prefetch so nothing hangs or outlives the run', async () => {
+  const clock = virtualClock();
+  const dir = tmpDir();
+  try {
+    const narrator = createNarrator({
+      engine: fakeEngine,
+      outputDir: dir,
+      now: clock.now,
+      sleep: clock.sleep,
+      gapMs: 350,
+      fetchImpl: async () => { await clock.sleep(60_000); return new Response(wavBytes(1)); },
+      onCaption: () => {},
+    });
+    narrator.prefetch(['slow line']);
+    const pending = narrator.ensure('slow line');
+    narrator.stop();
+    assert.equal(await pending, null); // resolved, not stuck
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
