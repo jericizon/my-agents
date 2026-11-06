@@ -47,6 +47,24 @@
  *   --screens-only   Capture screenshots + shots.json only — no video recording
  *                    or compositing (docs-generation mode; env DEMO_SCREENS_ONLY).
  *                    Disregards --voiceover: there is no video to mux audio into.
+ *   --smoke          Standalone pre-flight dry run of the exact flow: no video,
+ *                    no voiceover, no chrome mockup (env DEMO_SMOKE). Exercises
+ *                    real navigation/clicks/typing, then prints SMOKE_REPORT +
+ *                    writes health-report.json (non-OK responses, failed
+ *                    requests, console errors, page errors). Exit 0 = flow
+ *                    completed; findings are reported, not gated — the caller
+ *                    decides. Use it to iterate on fixes before a take.
+ *   --no-preflight   Skip the automatic pre-flight pass (env DEMO_NO_PREFLIGHT).
+ *                    By default every take first dry-runs the flow via a child
+ *                    --smoke pass: FLOW_ERROR aborts before the camera rolls;
+ *                    findings are echoed (preflight-report.json) and the take
+ *                    still proceeds. Disable only for flows that can't safely
+ *                    run twice (unrestorable mutations).
+ *
+ * HEALTH MONITORING (always on, every mode):
+ *   Each run records every HTTP response >= 400, every failed request, every
+ *   console.error and every uncaught page error, deduplicated with counts and
+ *   same-origin flagging, into <out>/health-report.json (HEALTH_JSON= line).
  *
  * THE FLOW FILE (see example-flow.mjs next to this file):
  *   export default async function runFlow(page, h) { ... }
@@ -63,10 +81,10 @@
  *   tooling (make-docs.mjs) can caption each figure with the live subtitle text.
  */
 import { createRequire } from 'module';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import { existsSync, mkdirSync, rmSync, readdirSync, copyFileSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
-import { pathToFileURL } from 'url';
+import { pathToFileURL, fileURLToPath } from 'url';
 import {
   createNarrator,
   extractNarrationTexts,
@@ -107,6 +125,12 @@ function parseArgs(argv) {
 }
 const args = parseArgs(process.argv.slice(2));
 
+// Smoke mode: a pre-flight dry run of the exact flow. Internally it rides the
+// screens-only pipeline (no recordVideo, no chrome mockup, no voiceover) — what
+// distinguishes it is intent: it exists to surface flow/health findings before
+// the camera rolls, so it prints a SMOKE_REPORT at the end.
+const SMOKE = !!(args.smoke || /^(1|true|yes|on)$/i.test(String(process.env.DEMO_SMOKE ?? '').trim()));
+
 const CONFIG = {
   BASE: args.base || process.env.DEMO_BASE || 'http://localhost:3000',
   FLOW: args.flow || process.env.DEMO_FLOW || null,
@@ -123,7 +147,12 @@ const CONFIG = {
   CHROME: !(args['no-chrome'] || /^(1|true|yes|on)$/i.test(String(process.env.DEMO_NO_CHROME ?? '').trim())),
   // Docs mode: capture milestone screenshots + shots.json without any video
   // pipeline (no recordVideo, no chrome mockup, no ffmpeg post-processing).
-  SCREENS_ONLY: !!(args['screens-only'] || /^(1|true|yes|on)$/i.test(String(process.env.DEMO_SCREENS_ONLY ?? '').trim())),
+  SCREENS_ONLY: SMOKE || !!(args['screens-only'] || /^(1|true|yes|on)$/i.test(String(process.env.DEMO_SCREENS_ONLY ?? '').trim())),
+  SMOKE,
+  // Automatic pre-flight: every take first dry-runs the flow as a child --smoke
+  // pass (skipped under --smoke itself — that IS the pre-flight). Findings are
+  // surfaced but not gated; a flow that errors aborts the take before it starts.
+  PREFLIGHT: !SMOKE && !(args['no-preflight'] || /^(1|true|yes|on)$/i.test(String(process.env.DEMO_NO_PREFLIGHT ?? '').trim())),
 };
 
 // Layout of the composited .mp4 canvas: the recording floats as a browser window
@@ -411,6 +440,47 @@ async function loadFlow(flowPath) {
 (async () => {
   // Screens-only runs produce no video, so there is nothing to mux voiceover
   // into — disregard the request (h.narrate still emits captions for shots.json).
+  if (CONFIG.SMOKE) {
+    console.log('[recorder] smoke mode — dry run of the flow; no video/voiceover, health findings reported at the end.');
+  }
+  // Pre-flight: dry-run the exact flow as a child --smoke pass before spending a
+  // real take (browser launch, TTS pre-synthesis, video). A flow that can't
+  // complete aborts here — before the camera rolls. Findings are echoed by the
+  // child and hoisted to preflight-report.json; the take still proceeds.
+  if (CONFIG.PREFLIGHT) {
+    const preflightDir = path.join(CONFIG.OUT_DIR, '.preflight');
+    const childArgs = [
+      fileURLToPath(import.meta.url),
+      '--base', CONFIG.BASE,
+      ...(CONFIG.FLOW ? ['--flow', CONFIG.FLOW] : []),
+      '--out', preflightDir,
+      '--name', `${CONFIG.NAME}-preflight`,
+      '--width', String(CONFIG.VIEWPORT.width),
+      '--height', String(CONFIG.VIEWPORT.height),
+      '--smoke',
+    ];
+    console.log('[recorder] pre-flight — dry-running the flow before recording…');
+    const r = spawnSync(process.execPath, childArgs, {
+      stdio: 'inherit',
+      // Pre-flight stays headless even when the take itself is headed.
+      env: { ...process.env, DEMO_HEADED: '' },
+    });
+    if (r.error || r.status !== 0) {
+      console.error('PREFLIGHT_FAILED — flow cannot complete a clean pass; aborting before recording.');
+      process.exit(1);
+    }
+    const childReport = path.join(preflightDir, 'health-report.json');
+    let preflightSummary = 'CLEAN';
+    if (existsSync(childReport)) {
+      copyFileSync(childReport, path.join(CONFIG.OUT_DIR, 'preflight-report.json'));
+      try {
+        const c = JSON.parse(readFileSync(childReport, 'utf8')).counts || {};
+        const n = (c.httpErrors || 0) + (c.requestFailures || 0) + (c.consoleErrors || 0) + (c.pageErrors || 0);
+        preflightSummary = n ? `${n}_FINDINGS` : 'CLEAN';
+      } catch { /* report unreadable — findings already echoed by the child */ }
+    }
+    console.log('PREFLIGHT=' + preflightSummary);
+  }
   if (CONFIG.SCREENS_ONLY && CONFIG.VOICEOVER) {
     console.warn('[recorder] --screens-only produces no video — disregarding the voiceover request.');
     CONFIG.VOICEOVER = false;
@@ -545,6 +615,43 @@ async function loadFlow(flowPath) {
   });
   await context.addInitScript(overlayInit, { lanePx: IN_PAGE_LANE_PX, fontPx: CAPTION_FONT_PX });
   const page = await context.newPage();
+
+  // Always-on health monitoring. The flow exercises the app but rarely observes
+  // every failure itself — a swallowed 4xx/5xx, a rejected fetch, a console.error
+  // or an uncaught exception can all pass silently into a recorded take. Every
+  // finding lands in health-report.json (deduped, counted, same-origin flagged);
+  // --smoke runs additionally echo them inline as SMOKE_FINDING lines.
+  const health = { http: [], requests: [], console: [], page: [] };
+  const originOf = (u) => { try { return new URL(u).origin; } catch { return ''; } };
+  const baseOrigin = originOf(CONFIG.BASE);
+  const bump = (arr, key, entry) => {
+    const hit = arr.find((x) => x.key === key);
+    if (hit) hit.count += 1;
+    else arr.push({ key, count: 1, ...entry });
+  };
+  page.on('response', (r) => {
+    const status = r.status();
+    if (status < 400) return;
+    const method = r.request().method();
+    const url = r.url();
+    bump(health.http, `${method} ${status} ${url}`, { method, status, url, sameOrigin: originOf(url) === baseOrigin });
+  });
+  page.on('requestfailed', (req) => {
+    const error = req.failure()?.errorText || 'unknown';
+    // ERR_ABORTED is typically the page navigating away mid-fetch — noise, not a defect.
+    const benign = /ERR_ABORTED/i.test(error);
+    const url = req.url();
+    bump(health.requests, `${req.method()} ${url} ${error}`, { method: req.method(), url, error, benign, sameOrigin: originOf(url) === baseOrigin });
+  });
+  page.on('console', (msg) => {
+    if (msg.type() !== 'error') return;
+    const text = msg.text();
+    bump(health.console, text, { text, location: msg.location()?.url || null });
+  });
+  page.on('pageerror', (e) => {
+    const text = String(e?.message || e);
+    bump(health.page, text, { text });
+  });
 
   const toUrl = (p) => (/^https?:\/\//.test(p) ? p : CONFIG.BASE.replace(/\/$/, '') + (p.startsWith('/') ? p : `/${p}`));
   const recordingStartedAt = process.hrtime.bigint();
@@ -862,9 +969,44 @@ async function loadFlow(flowPath) {
   if (out && out.endsWith('.mp4')) {
     rmSync(path.join(CONFIG.OUT_DIR, `${CONFIG.NAME}.webm`), { force: true });
   }
+  // Health report — written on every run (smoke or real take) so findings from
+  // the take itself can be reviewed, not only from the dry run.
+  const realFailures = health.requests.filter((x) => !x.benign);
+  const findingCount = health.http.length + realFailures.length + health.console.length + health.page.length;
+  const healthJsonPath = path.join(CONFIG.OUT_DIR, 'health-report.json');
+  try {
+    writeFileSync(healthJsonPath, JSON.stringify({
+      base: CONFIG.BASE,
+      flow: CONFIG.FLOW,
+      mode: CONFIG.SMOKE ? 'smoke' : (CONFIG.SCREENS_ONLY ? 'screens-only' : 'record'),
+      capturedAt: new Date().toISOString(),
+      flowError: err ? String(err?.message || err) : null,
+      counts: {
+        httpErrors: health.http.length,
+        requestFailures: realFailures.length,
+        consoleErrors: health.console.length,
+        pageErrors: health.page.length,
+      },
+      httpErrors: health.http,
+      requestFailures: health.requests, // includes benign (aborted) entries, flagged
+      consoleErrors: health.console,
+      pageErrors: health.page,
+    }, null, 2));
+  } catch (e) { console.warn('[recorder] health-report.json write failed:', e.message); }
+
+  if (CONFIG.SMOKE) {
+    for (const x of health.http) console.log(`SMOKE_FINDING http ${x.status} ${x.method} ${x.url}${x.sameOrigin ? ' [same-origin]' : ''} x${x.count}`);
+    for (const x of realFailures) console.log(`SMOKE_FINDING requestfailed ${x.method} ${x.url} ${x.error}${x.sameOrigin ? ' [same-origin]' : ''} x${x.count}`);
+    for (const x of health.console) console.log(`SMOKE_FINDING console.error "${x.text.slice(0, 300)}" x${x.count}`);
+    for (const x of health.page) console.log(`SMOKE_FINDING pageerror "${x.text.slice(0, 300)}" x${x.count}`);
+    console.log(`SMOKE_REPORT=${err ? 'FLOW_ERROR' : (findingCount ? `${findingCount}_FINDINGS` : 'CLEAN')}`);
+  }
+
   console.log('WEBM=' + (webmOutput || 'NONE'));
   console.log('SHOTS=' + shotN);
   console.log('SHOTS_JSON=' + shotsJsonPath);
+  console.log('HEALTH=' + (err ? 'FLOW_ERROR' : (findingCount ? `${findingCount}_FINDINGS` : 'CLEAN')));
+  console.log('HEALTH_JSON=' + healthJsonPath);
   console.log('OUTPUT=' + (out || 'NONE'));
   console.log('FILES=' + readdirSync(CONFIG.OUT_DIR).join(','));
   if (err || voiceoverError) process.exit(1);

@@ -41,6 +41,8 @@ Do NOT use when:
 ## Core Rules
 
 - **Verify before recording.** Never record a flow that hasn't been confirmed working end-to-end: page loads, API requests succeed, expected success state appears, no console errors.
+- **Every take pre-flights itself.** The recorder automatically dry-runs the exact flow file as a smoke pass — real selectors, real data, real clicks, no video/voiceover — before the camera rolls: a flow error aborts the take; health findings (non-OK API responses, failed requests, console errors, page errors) are echoed + hoisted to `preflight-report.json` and the take proceeds. Review them; the same monitoring writes `health-report.json` on the take itself. `--smoke` runs the same pass standalone for iterating on fixes; `--no-preflight` skips it only for flows that can't safely run twice.
+- **Flows must be safe to run twice.** The automatic pre-flight already walks the flow — mutating flows must restore their data at the end, or the real take can fail a validation (e.g. uniqueness) that pre-flight passed.
 - **Check server health first; start it if down.** Detect the base URL from `.env`/config (never assume localhost — see URL Detection). If unreachable, start the dev server per `package.json` scripts and poll until ready. This skill MAY start servers.
 - The recorded flow must use a **visible moving cursor** (glide between targets) — not raw clicks.
 - **Every step must have a subtitle caption** so a non-technical viewer can follow. Captions burn into a dedicated strip below the browser window — outside the wrapper, never over app content.
@@ -81,7 +83,7 @@ Do NOT use when:
 
 ### Phase 0 — Resolve scope, URL, output dir
 
-1. **Deliverable + feature checklist.** Classify intent: **video** ("record a demo"), **docs** ("generate me docs", "walkthrough document"), or **both** ("record it and give me docs"). For docs-only requests, first check `<project shared dir>/docs/client-demo/` for an existing session dir with the needed screenshots — reuse skips capture entirely (jump to Phase 7 docs build; confirm the dir with the user if ambiguous). For a single feature, capture it and the app's base URL (ask only if it can't be inferred). For a set, enumerate every important feature up front — this becomes the checklist and order.
+1. **Deliverable + feature checklist.** Classify intent: **video** ("record a demo"), **docs** ("generate me docs", "walkthrough document"), or **both** ("record it and give me docs"). For docs-only requests, first check `<project shared dir>/docs/client-demo/` for an existing session dir with the needed screenshots — reuse skips capture entirely (jump to Phase 8 docs build; confirm the dir with the user if ambiguous). For a single feature, capture it and the app's base URL (ask only if it can't be inferred). For a set, enumerate every important feature up front — this becomes the checklist and order.
 2. **Detect the base URL** from `.env.local`, `.env.development`, `.env`, `package.json` scripts, then app config (`vite.config.*`, `next.config.*`). Fall back to `http://localhost:3000` only if nothing is found. Note frontend vs backend ports if split.
 3. **Output dir:** `<project shared dir>/docs/client-demo/<YYYYMMDD_HHMMSS>_<slug>/` (Shared Workspace Artifacts in global rules; `date +%Y%m%d_%H%M%S`). Slug = feature name, or a concise kebab-case feature-set summary (`[a-z0-9-]`, ≤60 chars, else `demo-session`).
 
@@ -106,13 +108,33 @@ Already have a `PRODUCT_BRIEF.md` from an earlier session for the same app? Reus
 
 ### Phase 3 — Verify flows end-to-end
 
-For each feature on the checklist, exercise the core flow: page loads clean, the action completes, the success state shows, no console/network errors. Broken → debug and apply the smallest safe fix (`systematic-debugging` if needed), re-verify. Can't fix → mark `BLOCKED`, continue with others. **No recording until every feature is verified or marked.**
+For each feature on the checklist, exercise the core flow: page loads clean, the action completes, the success state shows, no console/network errors. Broken → debug and apply the smallest safe fix (`systematic-debugging` if needed), re-verify. Can't fix → mark `BLOCKED`, continue with others. **No recording until every feature is verified or marked.** This verifies the *journey*; Phase 5 smoke-tests the *scripted flow file* — both gates apply.
 
 ### Phase 4 — Author flow file(s)
 
 Copy `assets/example-flow.mjs` per feature and adapt: `h.explain(locator, text)` for every control from Phase 2 (including untouched ones), `h.narrate(...)` before each action step (the spoken line IS the caption — short and client-friendly), `h.caption(...)` only for labels that must NOT be read aloud, `h.glideClick`/`h.glideTo`/`h.type` for actions, `h.shot('<label>')` at milestones, `h.goto` downstream pages and explain the result, restore mutated data at the end. Write narration in the product's own vocabulary — the `PRODUCT_BRIEF.md` glossary — framed as what the user accomplishes, and order feature-set clips per the brief's demo arc. Write narrate/explain text as **plain string literals** wherever possible so the recorder can pre-synthesize it before the camera rolls (dynamic lines still work — they're generated on the spot, add a pause, and get logged as on-camera stalls).
 
-### Phase 5 — Record
+### Phase 5 — Pre-flight check (automatic smoke pass)
+
+No separate step needed: when Phase 6 runs the recorder, it **automatically dry-runs the flow first** — a child `--smoke` pass with the same base URL and flow. Watch its output before the take:
+
+- `PREFLIGHT=CLEAN` → take proceeds, nothing to review.
+- `PREFLIGHT=<n>_FINDINGS` → take still proceeds, but `SMOKE_FINDING` lines + `preflight-report.json` detail every non-OK API response, failed request, console error, and page error (deduped, same-origin flagged). Same-origin API ≥400, failed requests, page errors → fix the cause (demo data that trips validation, stale selector, backend bug) and re-run; third-party noise (analytics, favicon 404) may be waived with a note in `MANIFEST.md`.
+- `PREFLIGHT_FAILED` / non-zero exit → the take was aborted before the camera rolled. Fix the flow — a flow that can't finish a dry run will never produce a clean take. Can't fix → mark the feature `BLOCKED`, continue with the rest.
+
+To iterate on fixes without burning takes, run the same pass standalone:
+
+```bash
+DEMO_MODULES="$CACHE_DIR" \
+PLAYWRIGHT_BROWSERS_PATH="$CACHE_DIR/ms-browsers" \
+  node /abs/path/to/skills/using-my-presenter/assets/demo-recorder.mjs \
+    --base <base_url> --flow "$CLIP_DIR/flow.mjs" \
+    --out "$CLIP_DIR" --name <feature>-smoke --smoke
+```
+
+`SMOKE_REPORT=CLEAN|<n>_FINDINGS|FLOW_ERROR`; exit 0 whenever the flow completes — the **findings are the gate**, read them. The pre-flight mutates the same data a take would, so the flow's restore step must leave the app ready for the real run; only use `--no-preflight` for flows that genuinely can't run twice (unrestorable mutations), and note it in `MANIFEST.md`.
+
+### Phase 6 — Record
 
 Run the one-time tooling setup, then record per clip:
 
@@ -134,15 +156,15 @@ PLAYWRIGHT_BROWSERS_PATH="$CACHE_DIR/ms-browsers" \
     --out "$CLIP_DIR" --name <feature>-demo [--voiceover]
 ```
 
-Docs-only runs add `--screens-only`: no video is recorded or composited — the deliverables are `screenshots/` + `shots.json` (per-shot caption/url metadata). `--voiceover` is disregarded in screens-only mode.
+Docs-only runs add `--screens-only`: no video is recorded or composited — the deliverables are `screenshots/` + `shots.json` (per-shot caption/url metadata). `--voiceover` is disregarded in screens-only mode. Every run — record, screens-only, or smoke — writes `health-report.json` with the non-OK responses / failed requests / console errors / page errors observed during it.
 
 Multi-clip: `01_login` first (only clip showing auth), then `02_<feature>`, `03_<feature>`… each going directly to the feature URL with the authenticated session reused (re-auth silently inside the flow if the recorder's fresh context requires it).
 
-### Phase 6 — Per-clip verify
+### Phase 7 — Per-clip verify
 
-After each clip: recorder exited 0 (no `FLOW_ERROR`), `.mp4` exists (or `.webm` if ffmpeg missing — skipped under `--screens-only`), `screenshots/` populated, `shots.json` written with captions, and no failed flow / broken selector / missing success state on video. Faulty → delete the clip dir, fix, re-verify, re-record. Only then start the next clip.
+After each clip: recorder exited 0 (no `FLOW_ERROR`), `HEALTH=CLEAN` (or `health-report.json` findings reviewed and accounted for — a clean smoke does not guarantee a clean take), `.mp4` exists (or `.webm` if ffmpeg missing — skipped under `--screens-only`), `screenshots/` populated, `shots.json` written with captions, and no failed flow / broken selector / missing success state on video. Faulty → delete the clip dir, fix, re-verify, re-record. Only then start the next clip.
 
-### Phase 7 — Deliver
+### Phase 8 — Deliver
 
 - **Docs requested (or reusing an existing session):** run `assets/make-docs.mjs` on the session dir (feature set → sections per clip) or clip dir (single feature). Emits `demo-docs.docx` + `demo-docs.pdf` (default `both`; `--format docx|pdf` narrows; `--title`/`--subtitle`/`--out` override — title it from `PRODUCT_BRIEF.md`'s product name + the demo scope, e.g. `"Acme POS — Staff ordering walkthrough"`). Verify the outputs open validly (docx is a zip with `word/document.xml` + `word/media/*`; pdf starts `%PDF`) and every shot appears ordered + captioned.
 
@@ -153,7 +175,7 @@ PLAYWRIGHT_BROWSERS_PATH="$CACHE_DIR/ms-browsers" \
     --dir "<out-or-existing-session>" [--title "..."] [--format both]
 ```
 
-- **Feature set:** write `$SESSION_DIR/MANIFEST.md` — date, base URL, server state, numbered clip index, verification/re-record status, any `BLOCKED` features with reasons.
+- **Feature set:** write `$SESSION_DIR/MANIFEST.md` — date, base URL, server state, numbered clip index, smoke-report + verification/re-record status (incl. any waived findings), any `BLOCKED` features with reasons.
 - Report the output dir (and manifest, docs) to the user.
 
 ## Flow Helpers
@@ -196,7 +218,10 @@ Keep the recorder, browser, and TTS work inside bounds so nothing freezes or OOM
 - The `.mp4` composites the recording as a floating browser window (macOS chrome bar, live-URL pill, rounded corners, drop shadow) on a white canvas — composited in post, never covering content. Disable with `--no-chrome` / `DEMO_NO_CHROME=1`.
 - Subtitles burn below the browser window in post; if ffmpeg is unavailable the recorder falls back to an in-page caption lane so `.webm` keeps captions.
 - Off-screen targets scroll into view with smooth scrolling before the cursor glides; the spotlight auto-clears before every navigation.
-- Flags also settable via env: `DEMO_BASE / DEMO_FLOW / DEMO_OUT / DEMO_NAME / DEMO_WIDTH / DEMO_HEIGHT / DEMO_FPS / DEMO_NO_CHROME / DEMO_HEADED / DEMO_VOICEOVER / DEMO_SCREENS_ONLY / DEMO_MUSIC / DEMO_MUSIC_* / DEMO_VO_* / DEMO_NAV_TIMEOUT_MS / VS_* / DEMO_AUDIO_* / DEMO_MODULES`. Run with no `--flow` for a placeholder open-only clip to verify setup.
+- Flags also settable via env: `DEMO_BASE / DEMO_FLOW / DEMO_OUT / DEMO_NAME / DEMO_WIDTH / DEMO_HEIGHT / DEMO_FPS / DEMO_NO_CHROME / DEMO_HEADED / DEMO_VOICEOVER / DEMO_SCREENS_ONLY / DEMO_SMOKE / DEMO_NO_PREFLIGHT / DEMO_MUSIC / DEMO_MUSIC_* / DEMO_VO_* / DEMO_NAV_TIMEOUT_MS / VS_* / DEMO_AUDIO_* / DEMO_MODULES`. Run with no `--flow` for a placeholder open-only clip to verify setup.
+- **Every take auto-preflights.** Before the camera rolls, the recorder spawns itself with `--smoke` (headless, same flow/base/viewport) into `<out>/.preflight/`: child exits non-zero → `PREFLIGHT_FAILED`, parent aborts; findings → `SMOKE_FINDING` echo + `<out>/preflight-report.json` + `PREFLIGHT=<n>_FINDINGS|CLEAN`, take proceeds. Costs one extra flow run (~the flow's duration) per clip. `--no-preflight` skips it — only for flows that can't run twice.
+- `--smoke` standalone is the same pass for iterating on fixes: rides the screens-only pipeline (no video/voiceover/chrome mockup) — prints `SMOKE_FINDING` lines + `SMOKE_REPORT=CLEAN|<n>_FINDINGS|FLOW_ERROR`. Exit code still reflects flow completion only; findings are a human/agent review gate.
+- Every run writes `health-report.json` next to the output: `mode`, `flowError`, `counts`, and deduped `httpErrors` / `requestFailures` (benign `ERR_ABORTED` flagged) / `consoleErrors` / `pageErrors` with `sameOrigin` flags. Console `HEALTH=CLEAN|<n>_FINDINGS|FLOW_ERROR` + `HEALTH_JSON=` lines summarize it.
 - `shots.json` is written next to `screenshots/` in every mode (per-shot label, live caption, page URL) — `assets/make-docs.mjs` consumes it for figure captions. `.docx` generation needs the `docx` dep (installed into the cache by `setup-tooling.sh`); `.pdf` prints generated HTML through the cached Chromium — no extra deps.
 - After a successful record, the raw capture and intermediate `.webm` are auto-cleaned — only `.mp4` + `screenshots/` + `shots.json` remain.
 
@@ -209,6 +234,8 @@ Single feature:
 ├── login-demo.mp4        (absent under --screens-only)
 ├── flow.mjs
 ├── shots.json            (per-shot captions/urls — doc source)
+├── health-report.json    (errors observed during the take — every mode)
+├── preflight-report.json (errors observed during the automatic pre-flight)
 ├── demo-docs.docx/.pdf   (docs requested)
 └── screenshots/ (001_open.png …)
 ```
@@ -219,7 +246,7 @@ Feature set:
 ├── PRODUCT_BRIEF.md
 ├── MANIFEST.md
 ├── demo-docs.docx/.pdf   (docs requested — sections per clip)
-├── 01_login/    (login-demo.mp4, flow.mjs, shots.json, screenshots/)
+├── 01_login/    (login-demo.mp4, flow.mjs, shots.json, health-report.json, preflight-report.json, screenshots/)
 ├── 02_pos-creation/  (…)
 └── 03_dashboard/     (…)
 ```
@@ -227,11 +254,12 @@ Feature set:
 ## Completion Standard
 
 - scope classified (single vs set); every feature verified end-to-end **before** recording
+- every take pre-flighted automatically — `PREFLIGHT=CLEAN`, or findings reviewed/fixed/re-run, or benign ones explicitly waived in `MANIFEST.md`; mutating flows confirmed to restore their data so the real take re-runs clean
 - `PRODUCT_BRIEF.md` written once (or reused fresh) at the session root; narration uses the product's own vocabulary; feature-set clips ordered as a story arc, not checklist order
 - base URL detected from env/config; server confirmed running (started if needed)
 - every step captioned; cursor visibly moving; every meaningful control spotlight-explained; downstream result pages shown
 - one clean clip per feature under the session dir; login shown once only
-- every clip reviewed; faulty clips deleted and re-recorded; none contains a failed flow
+- every clip reviewed — including `health-report.json` from the take itself; faulty clips deleted and re-recorded; none contains a failed flow
 - screenshots at each milestone; `.mp4` present (or `.webm` fallback), always 60fps, size-optimized via CRF re-encode where beneficial
 - voiceover (if requested): verified audio stream, loudness-normalized, narration at natural speed with scenes held for measured duration, subtle ducked background bed (unless `--music none`), honest TTS disclosure
 - docs (if requested): `demo-docs.docx` + `demo-docs.pdf` present and valid, `shots.json` captured, every screenshot ordered + captioned, one section per feature; reused sessions built from existing screenshots, not re-captured
