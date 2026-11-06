@@ -50,13 +50,15 @@ function meanVolumeDb(ffmpeg, file, { ss = 0, t } = {}) {
   return m ? Number(m[1]) : null;
 }
 
+// Mirrors the production defaults in voiceover.mjs (MUSIC_DEFAULTS) — keep in
+// sync so these tests exercise the same mix the recorder produces.
 const plan = (over = {}) => ({
   enabled: true,
   source: { kind: 'bed' },
-  gain: 0.25,
+  gain: 0.1,
   fadeInSec: 1.5,
   fadeOutSec: 2,
-  duck: { threshold: 0.02, ratio: 6, attack: 20, release: 600 },
+  duck: { threshold: 0.015, ratio: 10, attack: 15, release: 800 },
   ...over,
 });
 
@@ -89,6 +91,13 @@ test('missing custom path falls back to the bundled bed with a warning', () => {
 
 test('unset music arg defaults to auto', () => {
   assert.equal(resolveMusicPlan({ voiceover: true, music: undefined, env: {} }).enabled, true);
+});
+
+test('default bed level keeps narration clearly dominant', () => {
+  const p = resolveMusicPlan({ voiceover: true, music: 'auto', env: {} });
+  assert.ok(p.gain <= 0.15, `default bed gain ${p.gain} is too loud — the bed must sit well under the voice`);
+  assert.ok(p.duck.ratio >= 8, `duck ratio ${p.duck.ratio} is too weak to keep the bed down under speech`);
+  assert.ok(p.duck.release >= 700, `duck release ${p.duck.release}ms lets the bed swell back between phrases`);
 });
 
 // ── mux graph shape ──────────────────────────────────────────────────────────
@@ -183,6 +192,39 @@ test('sidechain ducking lowers the bed while narration plays', { skip: !ffmpegBi
     const after = meanVolumeDb(ffmpegBin, out, { ss: 4.5, t: 1 }); // recovered
     assert.ok(during < before - 5, `ducked ${during}dB not clearly below bed ${before}dB`);
     assert.ok(after > during + 3, `post-speech bed did not recover: ${after} vs ${during}`);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('default mix keeps even a loud custom bed well under the voice', { skip: !ffmpegBin && 'no ffmpeg' }, () => {
+  const dir = tmpDir();
+  try {
+    const voice = path.join(dir, 'v.wav');
+    const mus = path.join(dir, 'mus.wav');
+    writeFileSync(voice, wavTone(2, 300, 48000, 0.5)); // 2s "speech" at t=1s
+    // constant-level track at ~-9dB RMS — a hot mastered music file, the
+    // realistic worst case for the bed competing with narration
+    writeFileSync(mus, wavTone(10, 160, 48000, 0.5));
+    const p = resolveMusicPlan({ voiceover: true, music: mus, env: {}, existsImpl: () => true });
+    const captions = [{ text: 'v', at: 1000 }];
+    const total = 8;
+
+    // narration-only baseline for the same voice window
+    const voiceOnly = path.join(dir, 'voiceonly.wav');
+    execFileSync(ffmpegBin, ['-y', '-v', 'error', '-i', voice,
+      '-filter_complex', buildAudioMixFilter(captions, {}, -1, null, null),
+      '-map', '[anorm]', voiceOnly]);
+    const V = meanVolumeDb(ffmpegBin, voiceOnly, { ss: 1.2, t: 1.5 });
+
+    const out = path.join(dir, 'mix.wav');
+    execFileSync(ffmpegBin, ['-y', '-v', 'error', '-i', voice, '-stream_loop', '-1', '-i', mus,
+      '-filter_complex', buildAudioMixFilter(captions, {}, -1, p, total),
+      '-map', '[aoutmix]', out]);
+    const duringVoice = meanVolumeDb(ffmpegBin, out, { ss: 1.2, t: 1.5 });
+    // bed fully recovered, but before the 2s fade-out that starts at total-2s
+    const gap = meanVolumeDb(ffmpegBin, out, { ss: 4.5, t: 1.0 });
+
+    assert.ok(duringVoice - V <= 1, `bed adds ${(duringVoice - V).toFixed(2)}dB under the voice — ducking must keep speech dominant`);
+    assert.ok(gap <= duringVoice - 18, `gap bed sits ${(duringVoice - gap).toFixed(1)}dB under the voice — must be at least 18dB down so narration stays clean`);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

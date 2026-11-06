@@ -40,7 +40,8 @@
  *   --voiceover      Spoken narration for h.narrate()/h.explain() via VoiceStudio
  *                    (OpenAI-compatible API, default http://localhost:3900).
  *                    Disregarded silently when VoiceStudio is unreachable.
- *                    Adds a lively background-music bed automatically.
+ *                    Adds a quiet background-music bed automatically, kept
+ *                    well under the narration (sidechain-ducked).
  *   --music <mode>   Background music: 'none' to disable, a file path for a
  *                    custom bed, or 'auto' (default with --voiceover) for the
  *                    bundled bed. (env DEMO_MUSIC)

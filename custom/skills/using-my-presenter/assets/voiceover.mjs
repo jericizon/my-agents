@@ -40,10 +40,10 @@ export const BUNDLED_BED_EXPR = `0.26*(sin(2*PI*(${_arp})*t)`
   + `+0.30*(sin(2*PI*(${_root})*0.5*t)+0.3*sin(2*PI*(${_root})*t))*(${_bassEnv})`
   + `+0.05*sin(2*PI*(${_root})*1.498*t)*(0.7+0.3*sin(2*PI*0.4*t))`;
 const MUSIC_DEFAULTS = Object.freeze({
-  gain: 0.25,
+  gain: 0.1,
   fadeInSec: 1.5,
   fadeOutSec: 2,
-  duck: Object.freeze({ threshold: 0.02, ratio: 6, attack: 20, release: 600 }),
+  duck: Object.freeze({ threshold: 0.015, ratio: 10, attack: 15, release: 800 }),
 });
 
 // Resolves the background-music plan from --music / DEMO_MUSIC. Music exists
