@@ -53,7 +53,7 @@ Resolution:
 
 * `WORKSPACE_ROOT` = `~/Workspace` if it exists, else `~/workspace` if it exists, else `~/Workspace` (create on demand).
 * `SHARED_ROOT` = `$WORKSPACE_ROOT/_shared` (created by `sync-agents.sh`; `mkdir -p` on first write).
-* Project shared dir = `$SHARED_ROOT/` + the project path relative to `WORKSPACE_ROOT`. Example: `~/Workspace/my-agents` → `~/Workspace/_shared/my-agents`; `~/Workspace/clients/adzeela` → `~/Workspace/_shared/clients/adzeela`.
+* Project shared dir = `$SHARED_ROOT/` + the project path relative to `WORKSPACE_ROOT`. Example: `~/Workspace/my-agents` → `~/Workspace/_shared/my-agents`; `~/Workspace/clients/custom-app` → `~/Workspace/_shared/clients/custom-app`.
 * Paths already under `_shared/` resolve to themselves.
 * Projects outside `WORKSPACE_ROOT` keep using in-repo paths.
 
