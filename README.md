@@ -13,6 +13,8 @@ The scripts in this repo keep one generated skills source in this workspace, the
 
 - `bash`
 - `git`
+- `timeout` (GNU coreutils; enables hard per-attempt timeouts on git network calls, recommended)
+- `pgrep` and `ps` (used by the recovery controller's duplicate-session check)
 - `npm` (only needed for some test suites)
 
 ## Repository Layout
@@ -24,6 +26,7 @@ The scripts in this repo keep one generated skills source in this workspace, the
 - `forks/superpowers-fork/`: upstream Superpowers mirror used as one update source
 - `forks/ui-ux-fork/`: upstream `nextlevelbuilder/ui-ux-pro-max-skill` mirror; its skills live under `.claude/skills/` and only the names in `UI_UX_SKILL_ALLOWLIST` are imported
 - `sync-agents.sh`: the only maintenance entrypoint; clones or refreshes all upstream mirrors, rebuilds generated skills, refreshes runtime links, and links global rules
+- `lib/reliability.sh`: shared helpers sourced by both scripts (structured events, jittered backoff, locks, alerts, abort boundary)
 
 ## Quick Start (Single Command)
 
@@ -64,6 +67,15 @@ This will:
 - always run all upstream skill updates, rebuild the merged generated tree, and refresh global rules in one pass
 
 If `~/.agents` or `~/.claude/skills` already exists, the installer backs it up to `*.backup.<timestamp>` before replacing it.
+
+## Sync Failure Handling
+
+- Clone and fetch retry only network-level failures (DNS, connection reset, timeouts, HTTP 5xx or 429). Authentication, missing-repository, and other permanent errors fail at once.
+- Each attempt has a hard timeout (`SYNC_ATTEMPT_TIMEOUT_SECONDS`, default 180) and git stall detection. Retries stop after `SYNC_MAX_ATTEMPTS` (default 3) or once `SYNC_DEADLINE_SECONDS` (default 600) has passed. Backoff starts at `SYNC_BACKOFF_BASE_SECONDS` (default 2), doubles, is jittered, and is capped at 30s.
+- A lock at `~/.cache/my-agents/sync.lock` keeps the git-hook sync and a manual sync from running together. A second run waits up to `SYNC_LOCK_WAIT_SECONDS` (default 60), then stops.
+- Skills are built in a staging directory and swapped in only when complete, so a failed build keeps the previous tree.
+- A failed sync exits non-zero and writes one `level=alert` line to stderr. To deliver alerts elsewhere, set `ALERT_COMMAND` to an executable that reads the line on stdin. No alert channel is configured in this repo.
+- Hard timeouts need GNU `timeout`. Without it, a warning is logged and only git's stall detection applies.
 
 ## Global Rules Across CLIs
 
@@ -134,8 +146,12 @@ When a harness hits a usage limit, record the failure and let the controller han
 ```
 
 Behavior and safety:
-- Categories `auth`, `billing`, `permission` are recorded as `BLOCKED`; `run` refuses them because waiting cannot fix them.
-- Retries are bounded (default 8, intervals double from 300s, capped at 3600s; override with `--max-retries` / `--interval-seconds`).
+- Categories `auth`, `billing`, `permission` are recorded as `BLOCKED`. `run` refuses them, because waiting cannot fix them, and raises one alert.
+- Retries are bounded (default 8). Waits double from 300s, capped at 3600s, with jitter (each wait falls between half and all of its scheduled interval). Override with `--max-retries` / `--interval-seconds`; both must be positive integers.
+- A retry is consumed only when a resume is confirmed and launched. `--print-command`, a declined prompt, or a refused run consumes nothing.
+- Each task has a lock, and a retry is claimed under it, so two controllers cannot launch the same retry. Exhausting the budget raises one alert.
+- The duplicate-session check refuses when a matching process may still be running. It fails closed if `pgrep` is missing or errors, and it ignores the controller's own process tree.
+- Every event is appended to `<task-id>.log` beside the state file. Progress text and session IDs are never written there.
 - Resume commands use only mechanisms verified against the installed harness versions (see Appendix A of the policy). Unknown harnesses or categories stop without inventing anything.
 - State lives at `<project shared dir>/.superpowers/recovery/<task-id>.state` (in-repo when the project is outside the workspace root); it stores IDs and paths only, never secrets.
 
@@ -168,7 +184,15 @@ To import more skills from the `ui-ux-pro-max-skill` repo (it ships `ui-styling`
 
 ## Tests
 
-From repo root:
+Repo tests run offline in temp directories, with fake `git`, `pgrep`, and harness CLIs:
+
+```bash
+bash tests/test-reliability-lib.sh
+bash tests/test-sync-agents-reliability.sh
+bash tests/test-quota-recovery-controller.sh
+```
+
+Upstream Superpowers skill tests, from repo root:
 
 ```bash
 bash forks/superpowers-fork/tests/claude-code/run-skill-tests.sh

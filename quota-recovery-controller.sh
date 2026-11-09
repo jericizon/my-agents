@@ -6,14 +6,21 @@
 # mechanisms and only with explicit confirmation.
 #
 # State: <project shared dir>/.superpowers/recovery/<task-id>.state  (KEY=value lines)
+# History: <task-id>.log beside it (append-only events; never progress text or session IDs)
 # Exit codes: 0 ok | 1 usage | 2 unsupported/blocked | 3 duplicate suspected
 #             4 retries exhausted | 5 confirmation required
 
-set -euo pipefail
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/reliability.sh"
+trap 'on_abort $? $LINENO recovery' ERR
 
 BASE_INTERVAL_SECONDS=300
 MAX_INTERVAL_SECONDS=3600
 DEFAULT_MAX_RETRIES=8
+LOCK_WAIT_SECONDS=5
+STATE_KEYS="HARNESS PROJECT_DIR TASK_ID SESSION_ID CHECKPOINT_PATH CATEGORY LAST_PROGRESS RETRY_COUNT MAX_RETRIES BASE_INTERVAL NEXT_RETRY_EPOCH STATUS OUTCOME CREATED_EPOCH UPDATED_EPOCH ALERTED"
 
 # Categories that waiting can never fix; a human must act.
 REFUSED_CATEGORIES="auth billing permission"
@@ -90,13 +97,21 @@ state_get() {
     printf '%s' "$value"
 }
 
-state_set() {
-    local file="$1"
-    local key="$2"
-    local value="$3"
-    touch "$file"
-    grep -v "^${key}=" "$file" >"$file.tmp" || true
-    printf '%s=%s\n' "$key" "$value" >>"$file.tmp"
+# load_state <file>: sets the state globals; empty when the file is absent.
+load_state() {
+    local file="$1" key
+    for key in $STATE_KEYS; do
+        printf -v "$key" '%s' "$(state_get "$file" "$key")"
+    done
+}
+
+# write_state <file>: replaces the whole record with one rename, so readers never see a partial file.
+write_state() {
+    local file="$1" key
+    : >"$file.tmp"
+    for key in $STATE_KEYS; do
+        printf '%s=%s\n' "$key" "${!key}" >>"$file.tmp"
+    done
     mv "$file.tmp" "$file"
 }
 
@@ -150,18 +165,47 @@ resume_command() {
     esac
 }
 
+# This process and its parents, space-separated.
+ancestor_pids() {
+    local pid=$$ parent
+    while [ "$pid" -gt 1 ]; do
+        printf ' %s' "$pid"
+        parent="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')" || break
+        [ -n "$parent" ] || break
+        pid="$parent"
+    done
+}
+
+# Fails closed: a matching process, a pgrep error, or no pgrep all count as "may be running".
+# Ancestors are ignored, since the harness that invoked this controller is the one being recovered.
 duplicate_session_running() {
-    # Best-effort: the harmful duplicate is resuming the SAME session again.
-    command -v pgrep >/dev/null 2>&1 || return 1
-    local harness="$1"
-    local session_id="$2"
-    local pattern
-    if [ -n "$session_id" ]; then
-        pattern="${harness}.*${session_id}"
-    else
-        pattern="${harness}"
-    fi
-    pgrep -f "$pattern" >/dev/null 2>&1
+    local harness="$1" session_id="$2" pattern pids pid rc=0
+    command -v pgrep >/dev/null 2>&1 || return 0
+    pattern="$harness"
+    [ -z "$session_id" ] || pattern="${harness}.*${session_id}"
+    pids="$(pgrep -f "$pattern" 2>/dev/null)" || rc=$?
+    case "$rc" in
+        0) ;;
+        1) return 1 ;;
+        *) return 0 ;;
+    esac
+    for pid in $pids; do
+        case "$(ancestor_pids) " in
+            *" $pid "*) ;;
+            *) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+lock_task() { acquire_lock "$1.lock" "$LOCK_WAIT_SECONDS" || die "another recovery operation holds $1.lock"; }
+unlock_task() { release_lock "$1.lock"; }
+
+# notify_once <alert key=value...>: one alert per failure event. The caller persists ALERTED.
+notify_once() {
+    [ "$ALERTED" != 1 ] || return 0
+    alert recovery "$@"
+    ALERTED=1
 }
 
 cmd_record() {
@@ -192,17 +236,22 @@ cmd_record() {
     validate_task_id "$task_id"
     validate_category "$category"
     [ -d "$project" ] || die "project directory does not exist: $project"
+    require_int --max-retries "$max_retries" 1
+    require_int --interval-seconds "$interval" 1
 
-    local file
+    local file now status
     file="$(state_path "$project" "$task_id")"
     mkdir -p "$(dirname "$file")"
+    LOG_CORRELATION_ID="$task_id"
+    LOG_FILE="${file%.state}.log"
+    lock_task "$file"
+    load_state "$file"
 
     # Preserve fields not supplied on this record call.
-    [ -n "$session_id" ] || session_id="$(state_get "$file" SESSION_ID)"
-    [ -n "$checkpoint" ] || checkpoint="$(state_get "$file" CHECKPOINT_PATH)"
+    [ -n "$session_id" ] || session_id="$SESSION_ID"
+    [ -n "$checkpoint" ] || checkpoint="$CHECKPOINT_PATH"
     [ -n "$checkpoint" ] || checkpoint="$(shared_project_dir "$project")/.superpowers/CURRENT_TASK.md"
 
-    local now status
     now="$(date +%s)"
     if is_refused_category "$category"; then
         status="BLOCKED"
@@ -210,23 +259,28 @@ cmd_record() {
         status="WAITING_FOR_QUOTA"
     fi
 
-    {
-        printf 'HARNESS=%s\n' "$harness"
-        printf 'PROJECT_DIR=%s\n' "$project"
-        printf 'TASK_ID=%s\n' "$task_id"
-        printf 'SESSION_ID=%s\n' "$(sanitize "$session_id")"
-        printf 'CHECKPOINT_PATH=%s\n' "$checkpoint"
-        printf 'CATEGORY=%s\n' "$category"
-        printf 'LAST_PROGRESS=%s\n' "$(sanitize "$progress")"
-        printf 'RETRY_COUNT=0\n'
-        printf 'MAX_RETRIES=%s\n' "$max_retries"
-        printf 'BASE_INTERVAL=%s\n' "$interval"
-        printf 'NEXT_RETRY_EPOCH=%s\n' "$((now + interval))"
-        printf 'STATUS=%s\n' "$status"
-        printf 'OUTCOME=\n'
-        printf 'CREATED_EPOCH=%s\n' "$now"
-        printf 'UPDATED_EPOCH=%s\n' "$now"
-    } >"$file"
+    HARNESS="$harness"
+    PROJECT_DIR="$project"
+    TASK_ID="$task_id"
+    SESSION_ID="$(sanitize "$session_id")"
+    CHECKPOINT_PATH="$(sanitize "$checkpoint")"
+    CATEGORY="$category"
+    LAST_PROGRESS="$(sanitize "$progress")"
+    RETRY_COUNT=0
+    MAX_RETRIES="$max_retries"
+    BASE_INTERVAL="$interval"
+    NEXT_RETRY_EPOCH=$((now + interval))
+    STATUS="$status"
+    OUTCOME=""
+    CREATED_EPOCH="$now"
+    UPDATED_EPOCH="$now"
+    ALERTED=""
+    if [ "$status" = "BLOCKED" ]; then
+        notify_once category="$category" outcome=blocked
+    fi
+    write_state "$file"
+    unlock_task "$file"
+    log_event info record outcome=recorded category="$category" status="$status"
 
     echo "Recorded failure event for task $task_id ($harness, $category)."
     echo "State: $file"
@@ -261,96 +315,88 @@ cmd_status() {
 
 cmd_run() {
     local project="" task_id="" assume_yes=0 print_command=0
-    local max_retries="" interval=""
+    local max_retries_cli="" interval_cli=""
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --project) project="$2"; shift 2 ;;
             --task-id) task_id="$2"; shift 2 ;;
             --yes) assume_yes=1; shift ;;
             --print-command) print_command=1; shift ;;
-            --max-retries) max_retries="$2"; shift 2 ;;
-            --interval-seconds) interval="$2"; shift 2 ;;
+            --max-retries) max_retries_cli="$2"; shift 2 ;;
+            --interval-seconds) interval_cli="$2"; shift 2 ;;
             *) die "run: unknown argument $1" ;;
         esac
     done
     [ -n "$project" ] || die "run: --project is required"
     [ -n "$task_id" ] || die "run: --task-id is required"
     validate_task_id "$task_id"
+    [ -z "$max_retries_cli" ] || require_int --max-retries "$max_retries_cli" 1
+    [ -z "$interval_cli" ] || require_int --interval-seconds "$interval_cli" 1
 
     local file
     file="$(state_path "$project" "$task_id")"
     [ -f "$file" ] || die "no recovery state for task $task_id; run record first"
+    LOG_CORRELATION_ID="$task_id"
+    LOG_FILE="${file%.state}.log"
+    load_state "$file"
+    require_int "RETRY_COUNT in state" "$RETRY_COUNT" 0
+    require_int "NEXT_RETRY_EPOCH in state" "$NEXT_RETRY_EPOCH" 0
+    [ -z "$max_retries_cli" ] || MAX_RETRIES="$max_retries_cli"
+    [ -z "$interval_cli" ] || BASE_INTERVAL="$interval_cli"
+    MAX_RETRIES="${MAX_RETRIES:-$DEFAULT_MAX_RETRIES}"
+    BASE_INTERVAL="${BASE_INTERVAL:-$BASE_INTERVAL_SECONDS}"
+    require_int "MAX_RETRIES in state" "$MAX_RETRIES" 1
+    require_int "BASE_INTERVAL in state" "$BASE_INTERVAL" 1
 
-    local harness category session_id status outcome retry_count
-    harness="$(state_get "$file" HARNESS)"
-    category="$(state_get "$file" CATEGORY)"
-    session_id="$(state_get "$file" SESSION_ID)"
-    status="$(state_get "$file" STATUS)"
-    outcome="$(state_get "$file" OUTCOME)"
-    retry_count="$(state_get "$file" RETRY_COUNT)"
-    [ -n "$max_retries" ] || max_retries="$(state_get "$file" MAX_RETRIES)"
-    [ -n "$max_retries" ] || max_retries="$DEFAULT_MAX_RETRIES"
-
-    if [ -n "$outcome" ]; then
-        echo "Task $task_id already resolved (outcome: $outcome). Nothing to do."
+    if [ -n "$OUTCOME" ]; then
+        echo "Task $task_id already resolved (outcome: $OUTCOME). Nothing to do."
         return 0
     fi
 
-    if is_refused_category "$category"; then
-        echo "Category '$category' requires human action (account, billing, or permissions)."
+    if is_refused_category "$CATEGORY"; then
+        echo "Category '$CATEGORY' requires human action (account, billing, or permissions)."
         echo "The controller will not retry it. Resolve the underlying issue, then record a new event."
         exit 2
     fi
 
-    validate_harness "$harness"
+    validate_harness "$HARNESS"
 
-    if ! command -v "$harness" >/dev/null 2>&1; then
-        state_set "$file" STATUS "BLOCKED"
-        echo "Harness CLI '$harness' is not installed. No supported recovery path exists."
-        echo "Checkpoint preserved at: $(state_get "$file" CHECKPOINT_PATH)"
+    if ! command -v "$HARNESS" >/dev/null 2>&1; then
+        lock_task "$file"
+        load_state "$file"
+        STATUS="BLOCKED"
+        notify_once category="$CATEGORY" outcome=blocked reason=harness_missing
+        write_state "$file"
+        unlock_task "$file"
+        echo "Harness CLI '$HARNESS' is not installed. No supported recovery path exists."
+        echo "Checkpoint preserved at: $CHECKPOINT_PATH"
         exit 2
     fi
 
-    if duplicate_session_running "$harness" "$session_id"; then
-        echo "A $harness process matching this session appears to be running."
-        echo "Refusing to restart work that may still be running concurrently."
-        exit 3
-    fi
-
-    local next_retry interval_now
-    interval_now="${interval:-$(state_get "$file" BASE_INTERVAL)}"
-    [ -n "$interval_now" ] || interval_now="$BASE_INTERVAL_SECONDS"
-
-    if [ "$retry_count" -ge "$max_retries" ]; then
-        state_set "$file" STATUS "EXHAUSTED"
-        echo "Retry budget exhausted ($retry_count/$max_retries attempts)."
+    if [ "$RETRY_COUNT" -ge "$MAX_RETRIES" ]; then
+        lock_task "$file"
+        load_state "$file"
+        STATUS="EXHAUSTED"
+        notify_once category="$CATEGORY" outcome=exhausted attempts="$RETRY_COUNT/$MAX_RETRIES"
+        write_state "$file"
+        unlock_task "$file"
+        echo "Retry budget exhausted ($RETRY_COUNT/$MAX_RETRIES attempts)."
         echo "Preserve the checkpoint and resume manually, or record a new failure event."
         exit 4
     fi
 
-    next_retry="$(state_get "$file" NEXT_RETRY_EPOCH)"
-    local now wait_seconds
+    local seen_retry="$RETRY_COUNT" now wait_seconds delay
     now="$(date +%s)"
-    wait_seconds=$((next_retry - now))
+    wait_seconds=$((NEXT_RETRY_EPOCH - now))
     if [ "$wait_seconds" -gt 0 ]; then
         echo "Waiting $wait_seconds seconds until the next eligible retry..."
         sleep "$wait_seconds"
     fi
 
-    retry_count=$((retry_count + 1))
-    local backoff=$((interval_now * (2 ** (retry_count - 1))))
-    [ "$backoff" -le "$MAX_INTERVAL_SECONDS" ] || backoff="$MAX_INTERVAL_SECONDS"
-    now="$(date +%s)"
-    state_set "$file" RETRY_COUNT "$retry_count"
-    state_set "$file" NEXT_RETRY_EPOCH "$((now + backoff))"
-    state_set "$file" BASE_INTERVAL "$interval_now"
-    state_set "$file" STATUS "READY_TO_RESUME"
-    state_set "$file" UPDATED_EPOCH "$now"
-
     local cmd_parts
-    IFS=' ' read -ra cmd_parts <<<"$(resume_command "$harness" "$session_id")"
+    IFS=' ' read -ra cmd_parts <<<"$(resume_command "$HARNESS" "$SESSION_ID")"
 
-    echo "Retry $retry_count/$max_retries eligible. Resume command:"
+    echo "Retry $((seen_retry + 1))/$MAX_RETRIES eligible. Resume command:"
     echo "  ${cmd_parts[*]}"
     if [ "$print_command" -eq 1 ]; then
         return 0
@@ -362,12 +408,38 @@ cmd_run() {
             exit 5
         fi
         local answer
-        read -r -p "Execute it now? [y/N] " answer
+        read -r -p "Execute it now? [y/N] " answer || answer=""
         case "$answer" in
             y|Y|yes|YES) ;;
             *) echo "Not executing. Run the command above when ready." ; exit 5 ;;
         esac
     fi
+
+    if duplicate_session_running "$HARNESS" "$SESSION_ID"; then
+        echo "A $HARNESS process matching this session appears to be running, or could not be checked."
+        echo "Refusing to restart work that may still be running concurrently."
+        log_event warn recovery outcome=refused reason=duplicate_suspected attempt="$((seen_retry + 1))"
+        exit 3
+    fi
+
+    # Claim the retry under the lock; a concurrent claim changes RETRY_COUNT and this run stops.
+    lock_task "$file"
+    load_state "$file"
+    if [ "$RETRY_COUNT" != "$seen_retry" ] || [ -n "$OUTCOME" ]; then
+        unlock_task "$file"
+        echo "Recovery state changed while waiting; another controller may have claimed this retry. Check status before retrying."
+        log_event warn recovery outcome=refused reason=state_changed
+        exit 3
+    fi
+    RETRY_COUNT=$((RETRY_COUNT + 1))
+    now="$(date +%s)"
+    delay="$(backoff_seconds "$RETRY_COUNT" "$BASE_INTERVAL" "$MAX_INTERVAL_SECONDS")"
+    NEXT_RETRY_EPOCH=$((now + delay))
+    STATUS="READY_TO_RESUME"
+    UPDATED_EPOCH="$now"
+    write_state "$file"
+    unlock_task "$file"
+    log_event info recovery outcome=launching category="$CATEGORY" attempt="$RETRY_COUNT" max="$MAX_RETRIES" harness="$HARNESS"
 
     echo "Launching: ${cmd_parts[*]}"
     echo "After the session ends, inspect the repository and run: $0 resolve --project '$project' --task-id '$task_id' --outcome succeeded|failed|abandoned|manual"
@@ -396,12 +468,20 @@ cmd_resolve() {
     local file
     file="$(state_path "$project" "$task_id")"
     [ -f "$file" ] || die "no recovery state for task $task_id; run record first"
-
-    local now
-    now="$(date +%s)"
-    state_set "$file" OUTCOME "$outcome"
-    state_set "$file" STATUS "RESOLVED"
-    state_set "$file" UPDATED_EPOCH "$now"
+    LOG_CORRELATION_ID="$task_id"
+    LOG_FILE="${file%.state}.log"
+    lock_task "$file"
+    load_state "$file"
+    if [ -n "$OUTCOME" ] && [ "$OUTCOME" != "$outcome" ]; then
+        unlock_task "$file"
+        die "task $task_id already resolved with outcome $OUTCOME"
+    fi
+    OUTCOME="$outcome"
+    STATUS="RESOLVED"
+    UPDATED_EPOCH="$(date +%s)"
+    write_state "$file"
+    unlock_task "$file"
+    log_event info resolve outcome="$outcome"
     echo "Task $task_id resolved with outcome: $outcome"
 }
 

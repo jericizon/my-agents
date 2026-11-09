@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FORK_DIR="$SCRIPT_DIR/forks/superpowers-fork"
@@ -19,6 +19,23 @@ CODEX_SKILLS_TARGET="$HOME/.codex/skills"
 GEMINI_SKILLS_TARGET="$HOME/.gemini/skills"
 WINDSURF_SKILLS_TARGET="$HOME/.codeium/windsurf/skills"
 TIMESTAMP="$(date +%s)"
+source "$SCRIPT_DIR/lib/reliability.sh"
+trap 'on_abort $? $LINENO sync' ERR
+LOG_CORRELATION_ID="sync-$TIMESTAMP-$$"
+SYNC_MAX_ATTEMPTS="${SYNC_MAX_ATTEMPTS:-3}"
+SYNC_ATTEMPT_TIMEOUT_SECONDS="${SYNC_ATTEMPT_TIMEOUT_SECONDS:-180}"
+SYNC_DEADLINE_SECONDS="${SYNC_DEADLINE_SECONDS:-600}"
+SYNC_BACKOFF_BASE_SECONDS="${SYNC_BACKOFF_BASE_SECONDS:-2}"
+SYNC_BACKOFF_CAP_SECONDS=30
+SYNC_LOCK_WAIT_SECONDS="${SYNC_LOCK_WAIT_SECONDS:-60}"
+SYNC_LOCK_DIR="$HOME/.cache/my-agents/sync.lock"
+# Git stderr that marks a network-level failure. Anything else is permanent and not retried.
+GIT_TRANSIENT_ERRORS='Could not resolve host|Failed to connect|Connection (timed out|reset|refused|closed)|Operation timed out|Recv failure|RPC failed|early EOF|unexpected disconnect|hung up unexpectedly|transfer closed|requested URL returned error: (429|5[0-9][0-9])|GnuTLS recv error|SSL connect error|Network is unreachable'
+require_int SYNC_MAX_ATTEMPTS "$SYNC_MAX_ATTEMPTS" 1
+require_int SYNC_ATTEMPT_TIMEOUT_SECONDS "$SYNC_ATTEMPT_TIMEOUT_SECONDS" 1
+require_int SYNC_DEADLINE_SECONDS "$SYNC_DEADLINE_SECONDS" 0
+require_int SYNC_BACKOFF_BASE_SECONDS "$SYNC_BACKOFF_BASE_SECONDS" 0
+require_int SYNC_LOCK_WAIT_SECONDS "$SYNC_LOCK_WAIT_SECONDS" 0
 
 backup_target() {
     local target="$1"
@@ -275,6 +292,36 @@ ensure_upstream_remote() {
     git remote add upstream "$remote_url"
 }
 
+# Network git calls: hard per-attempt timeout, stall detection, overall deadline; retries only transient failures.
+git_network() {
+    local op="$1" attempt=1 started rc out delay now
+    shift
+    started="$(date +%s)"
+    while :; do
+        rc=0
+        out="$(run_bounded "$SYNC_ATTEMPT_TIMEOUT_SECONDS" git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60 "$@" 2>&1)" || rc=$?
+        if [ "$rc" -eq 0 ]; then
+            [ "$attempt" -eq 1 ] || log_event info "$op" outcome=recovered attempts="$attempt"
+            return 0
+        fi
+        if [ "$rc" -ne 124 ] && ! grep -Eqi "$GIT_TRANSIENT_ERRORS" <<<"$out"; then
+            log_event error "$op" category=permanent attempts="$attempt" status="$rc"
+            printf '%s\n' "$out" >&2
+            return "$rc"
+        fi
+        delay="$(backoff_seconds "$attempt" "$SYNC_BACKOFF_BASE_SECONDS" "$SYNC_BACKOFF_CAP_SECONDS")"
+        now="$(date +%s)"
+        if [ "$attempt" -ge "$SYNC_MAX_ATTEMPTS" ] || [ $((now + delay - started)) -gt "$SYNC_DEADLINE_SECONDS" ]; then
+            log_event error "$op" category=exhausted attempts="$attempt" status="$rc"
+            printf '%s\n' "$out" >&2
+            return "$rc"
+        fi
+        log_event warn "$op" category=transient attempt="$attempt" next_in="${delay}s" status="$rc"
+        sleep "$delay"
+        attempt=$((attempt + 1))
+    done
+}
+
 setup_mirror_repo() {
     local repo_dir="$1"
     local repo_url="$2"
@@ -286,7 +333,7 @@ setup_mirror_repo() {
     fi
 
     echo "Cloning $label repository..."
-    git clone --depth 1 "$repo_url" "$repo_dir"
+    git_network "$label.clone" clone --depth 1 "$repo_url" "$repo_dir"
     git -C "$repo_dir" remote rename origin upstream
 }
 
@@ -311,7 +358,7 @@ refresh_repo() {
     cd "$repo_dir"
     ensure_upstream_remote "$remote_url"
     echo "Fetching $label upstream..."
-    git fetch upstream
+    git_network "$label.fetch" fetch upstream
     echo "Resetting $label to latest upstream/main..."
     git reset --hard upstream/main
 }
@@ -375,24 +422,33 @@ rebuild_generated_skills() {
     local superpowers_skills_source="$FORK_DIR/skills"
     local ui_ux_skills_source="$UI_UX_FORK_DIR/.claude/skills"
     local custom_skills_dir="$SCRIPT_DIR/custom/skills"
+    local staging="$SOURCE_DIR/.skills-staging-$$"
+    local previous="$SOURCE_DIR/.skills-previous"
 
     require_skills_source_dir "$superpowers_skills_source" "Superpowers"
     require_skills_source_dir "$ui_ux_skills_source" "ui-ux-pro-max"
 
-    if [ ! -d "$SKILLS_DIR" ]; then
-        echo "Creating superpowers-agents/skills directory..."
-        mkdir -p "$SKILLS_DIR"
-    fi
+    # Leftovers from an interrupted run; the sync lock keeps other runs out.
+    mkdir -p "$SOURCE_DIR"
+    rm -rf "$SOURCE_DIR"/.skills-staging-* "$previous"
 
     echo "Rebuilding generated skills tree..."
-    rm -rf "$SKILLS_DIR"/*
-    cp -R "$superpowers_skills_source/." "$SKILLS_DIR/"
-    copy_missing_skill_dirs "$ui_ux_skills_source" "$SKILLS_DIR" "ui-ux-pro-max" "${UI_UX_SKILL_ALLOWLIST[@]}"
+    mkdir "$staging"
+    cp -R "$superpowers_skills_source/." "$staging/"
+    copy_missing_skill_dirs "$ui_ux_skills_source" "$staging" "ui-ux-pro-max" "${UI_UX_SKILL_ALLOWLIST[@]}"
 
     if [ -d "$custom_skills_dir" ] && [ "$(ls -A "$custom_skills_dir")" ]; then
         echo "Copying custom skills..."
-        cp -R "$custom_skills_dir/." "$SKILLS_DIR/"
+        cp -R "$custom_skills_dir/." "$staging/"
     fi
+
+    # Swap in the finished tree only; a failed build leaves the previous tree in place.
+    [ ! -d "$SKILLS_DIR" ] || mv "$SKILLS_DIR" "$previous"
+    if ! mv "$staging" "$SKILLS_DIR"; then
+        [ ! -d "$previous" ] || mv "$previous" "$SKILLS_DIR"
+        return 1
+    fi
+    rm -rf "$previous"
 
     echo ""
     echo "Current Superpowers status:"
@@ -403,6 +459,9 @@ rebuild_generated_skills() {
 
 echo "Running unified agents sync..."
 echo ""
+
+mkdir -p "$(dirname "$SYNC_LOCK_DIR")"
+acquire_lock "$SYNC_LOCK_DIR" "$SYNC_LOCK_WAIT_SECONDS" || { echo "ERROR: another sync is running (lock: $SYNC_LOCK_DIR)" >&2; exit 1; }
 
 ensure_rules_source_exists
 ensure_policy_source_exists
@@ -429,3 +488,4 @@ ensure_shared_workspace
 
 echo ""
 echo "Done. Skills, global rules, task continuity policy, and shared workspace are up to date."
+log_event info sync outcome=completed

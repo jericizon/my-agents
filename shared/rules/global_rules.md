@@ -274,6 +274,59 @@ Flag vulnerable or unmaintained dependencies.
 
 ---
 
+## PRODUCTION-GRADE ERROR HANDLING
+
+Apply to all code created or modified by a task. Implement each safeguard where the risk warrants it, document what does not apply and why, and avoid unnecessary machinery. Ask only when unresolved ambiguity could materially affect security, data integrity, or behavior.
+
+Failure handling:
+
+* Identify validation, authorization, transient, permanent, dependency, data-consistency, and unexpected failures before coding.
+* Validate inputs at the boundary and return clear, accurate, secure errors. Never expose stack traces, secrets, or internal paths.
+* Never report success for incomplete work, silently ignore a failure, discard failed work, or continue unsafe processing.
+* Auto-resolve routine errors only when safe: supported token refresh and recoverable connection failures.
+
+External calls and retries:
+
+* Set connection and operation timeouts on every external call.
+* Retry only transient failures and operations that are safe to repeat.
+* Bound retries: limited attempts, an overall deadline, exponential backoff with jitter, and server-provided Retry-After when present.
+* Never retry permanent failures, invalid input, or authorization failures unless a supported credential refresh can fix them.
+
+Data safety:
+
+* Make repeatable operations idempotent (idempotency keys or deduplication) so payments, records, messages, and notifications are not duplicated.
+* Prevent partial changes with transactions, rollbacks, compensating actions, or build-then-swap writes.
+* Preserve failed work and enough context (inputs, error, attempt history) to investigate and resume safely.
+
+Exception handling:
+
+* Catch specific exceptions only where the code can recover, add context, clean up, or return an accurate response.
+* Keep the original cause and stack trace when re-raising or wrapping.
+* Clean up with finally, defer, trap, or context managers.
+* Add an application-boundary handler for unexpected failures. It records the failure, then returns a safe response or terminates. Never swallow it and continue.
+
+Queued work and jobs:
+
+* Bound retries. Move repeatedly failing work to protected failure storage (dead-letter queue or equivalent).
+* Keep the message, error details, attempt history, and correlation ID. Provide monitoring and a safe, idempotent replay path.
+
+Logging and alerts:
+
+* Log structured events: timestamp, operation, error category, safe context, attempts, final outcome, and correlation ID.
+* Never log passwords, tokens, secrets, private data, or unnecessary sensitive values.
+* Log routine failures that recover; do not notify anyone for them.
+* Send one minimal, actionable, deduplicated alert only when recovery is exhausted or a failure threatens security, data, or an important process.
+* If no alerting channel exists, document the exact configuration required.
+
+Verification:
+
+* Test what applies: invalid input, permanent and transient failures, timeouts, exhausted retries, backoff and rate limits, idempotency and duplicates, rollbacks and partial failures, expected and unexpected exceptions, queue retry and replay, secure logging, correlation IDs, and alert conditions.
+* Run the relevant tests, linters, and type checks before claiming completion.
+
+Completion report: failure scenarios identified, safeguards implemented, tests and validation run, assumptions made, and unresolved risks or required configuration.
+
+---
+
 ## DOCUMENTATION
 
 Update documentation when:
@@ -386,6 +439,7 @@ Before marking work complete:
 * Validation completed
 * QA completed
 * Acceptance criteria verified
+* Error-handling requirements applied, or documented as not applicable
 * No known blocking issues
 
 Do not mark a task complete if validation or QA has not been performed.
