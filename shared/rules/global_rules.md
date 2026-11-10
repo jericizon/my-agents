@@ -355,8 +355,8 @@ Allowed:
 
 Forbidden:
 
-* git commit to restricted branches (main, master, develop, staging, or other protected branches as configured)
-* git push to restricted branches (main, master, develop, staging, or other protected branches as configured)
+* git commit to restricted branches (main, master, develop, dev, staging, or other protected branches as configured)
+* git push to restricted branches (main, master, develop, dev, staging, or other protected branches as configured), only with the user's explicit go signal for that specific push
 * git merge
 * git rebase
 * git reset
@@ -369,14 +369,14 @@ Never modify repository history.
 
 Before committing or pushing:
 * Verify the target branch is NOT a restricted/protected branch
-* For restricted branches, instruct the user to perform the operation manually or use proper PR workflow
+* For restricted branches, instruct the user to perform the operation manually or use proper PR workflow, unless the user has given an explicit go signal for that specific push
 
 If a task requires forbidden Git operations, instruct the user to perform them manually.
 
 ## WORKSPACE & BRANCH POLICY
 
 * Never use git worktrees for isolation. When a skill suggests creating a worktree (e.g. `using-git-worktrees`), skip that step and work directly on the current branch.
-* Before implementation, check the current branch. If it is `main`, `master`, `develop`, `staging`, or another protected branch, suggest creating a feature branch first and wait for approval before proceeding. On any other branch, work on it as-is.
+* Before implementation, check the current branch. If it is `main`, `master`, `develop`, `dev`, `staging`, or another protected branch, suggest creating a feature branch first and wait for approval before proceeding. On any other branch, work on it as-is.
 
 ## COMMIT MESSAGE GUIDELINES
 

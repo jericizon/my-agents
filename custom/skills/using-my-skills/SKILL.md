@@ -38,7 +38,7 @@ Task arrives
     ├── Vague idea / unclear intent? ─────→ brainstorming (clarity gate — see below)
     ├── Have requirements, need a plan? ──→ writing-plans
     ├── Executing a plan? ────────────────→ executing-plans
-    ├── Starting implementation? ──────────→ branch check: stay on current branch, no worktrees; on main/develop/staging → suggest a feature branch first
+    ├── Starting implementation? ──────────→ branch check: stay on current branch, no worktrees; on main/master/develop/dev/staging → suggest a feature branch first
     ├── UI / visual design work? ────────→ ui-ux-pro-max (design data, always first)
     │   └── Redesign / upgrade existing UI? → using-my-designer (audit-first)
     ├── Writing/running tests? ──────────→ test-driven-development
