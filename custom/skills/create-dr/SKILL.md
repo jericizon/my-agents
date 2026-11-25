@@ -1,144 +1,172 @@
 ---
 name: create-dr
-description: Use when the user asks for a daily report, DR, standup report, or a summary of what they worked on in the current repository for a day or date range — "create dr", "generate my daily report", "what did I do yesterday/this week", "DR for nov 21". Scans git history and uncommitted work within a local-time window and renders a per-day, per-ticket report with time estimates.
+description: Use when the user asks for a daily report, DR, standup report, timesheet, work report, or a summary of what they worked on for a day or date range — "create dr", "generate my daily report", "what did I do yesterday/this week", "DR for nov 21", "report for nov 1 to nov 24" — including server maintenance, investigations, estimates and other work that never reached git.
 ---
 
-# Create DR (Daily Report)
+# Create DR (Work Report)
 
 ## Overview
 
-Generate a copy-paste-ready daily work report from the repository the user is standing in. Evidence comes from git history plus uncommitted working-tree activity inside a **local-time** window. Output is grouped by calendar date, then by ticket, with an estimated time spent and itemized bullets of the actual work.
+Build a per-day, per-activity work report for a local-time window across the whole workspace. Evidence comes from:
+
+- git commits by the user in every repository under the workspace, plus today's uncommitted changes
+- Claude Code session logs (`~/.claude/projects/*/*.jsonl`): what the user asked for, and commands run on remote servers (ssh, scp, rsync, systemctl, …)
+
+That second source picks up the work git never sees: server maintenance, incident checks, data syncs, estimates, handovers and reviews.
 
 Core principles:
 
-- **Evidence or silence.** Every bullet traces to a commit, diff, or file change. Never invent work to fill a day. An empty window is reported as empty.
-- **Read-only.** Never write to, stage, commit, or otherwise modify the user's repository.
-- **Estimates are estimates.** Time spent is inferred from timestamps, never measured. Always render it as a rough estimate.
+- **Evidence or silence.** Every bullet traces to a commit or a session event. Never invent work to fill a day.
+- **Read-only.** Never write to, stage or commit in the user's repositories, and never touch a remote server while building the report.
+- **Reproducible hours.** `dr.py hours` computes every number. Never edit hours by hand.
+- **No secrets.** Never copy tokens, passwords, keys or server IPs into the report.
 
-## Step 1 — Resolve the time window
+## Step 1 — Resolve the window
 
-Ask the user which report to generate if they haven't said. Default: **today, local midnight → now**.
+Default: today, local midnight → now. Parse natural ranges in the machine's local timezone ("yesterday", "last week", "nov 1 to nov 24", "10pm nov 21 to 9pm nov 22"). Work belongs to the local calendar date it happened on.
 
-Parse natural ranges in the machine's **local timezone** (never UTC unless the user says so):
-
-- "today", "yesterday" → local midnight to midnight (or now, for today)
-- "10pm nov 21 to 9pm nov 22" → that exact span; overlapping days are fine
-- "last week", "nov 10 to nov 22" → multi-day spans produce one section per calendar date
-
-Work is attributed to the **local calendar date on which it happened** — a commit at 11pm Nov 21 belongs to the November 21 section even if the window ends Nov 22.
-
-## Step 2 — Gather evidence
-
-### Commits
-
-Author-filter to the user. Default email: `git config user.email` (fall back to `git config user.name`). Only scan all authors if the user explicitly asks.
+## Step 2 — Collect evidence
 
 ```bash
-git log --all --no-merges \
-  --since="<start ISO local>" --until="<end ISO local>" \
-  --author="<user email>" \
-  --date=iso-strict-local \
-  --format='%H|%cI|%s' --name-only
+python3 <skill-dir>/scripts/dr.py collect --since 2026-11-01 --until 2026-11-24 --out <scratchpad>/evidence.json
 ```
 
-- `--all` matters: work happens on feature branches, not just the current one.
-- `--no-merges`: merge commits are mechanical noise.
-- `--since/--until` compare committer date; passing local wall-clock datetimes keeps the window in local time. Confirm the machine timezone with `date` once if a boundary looks off.
-- Also read commit bodies (`git log --format='%B'`) when the subject alone doesn't explain the work.
+- `--until` with a bare date includes that whole day. Datetimes (`2026-11-21T22:00`) work for both ends.
+- `--workspace` defaults to `~/Workspace`, else `~/workspace`. `--author` defaults to the global `git config user.name`.
+- Output lines:
+  - `C`: a commit in local time, or `wip:<repo>` for an uncommitted file changed today, with `[TICKET]` when one was found. The repo is its path relative to the workspace.
+  - `S`: a session, with its project and time span.
+  - `T`: the session's active blocks. Use them to pick slice boundaries.
+  - `P`: a user prompt, cut to 300 characters.
+  - `R`: a remote/server command. IPs appear as stable aliases (`host1`, `host2`, …); work out each server's role from the prompts.
+- If the output ends with `WARNING: possible pasted credentials`, tell the user which sessions hold a pasted credential and that it is stored in plain text in the session log. Recommend revoking it. The evidence file already has it redacted.
 
-### Uncommitted work
+## Step 3 — Map evidence to activities
 
-WIP that was never committed still counts as work done:
+Read every `S` block and decide what work it was. Write `<scratchpad>/mapping.json`:
 
-```bash
-git status --porcelain
+```json
+{
+  "workday_hours": 7.5,
+  "sessions": [
+    ["9f97b724", "*",     "00:00", "24:00", "HICMR-QA"],
+    ["180da22b", "11-20", "08:27", "08:51", "VEOHRC-REPORTS"],
+    ["180da22b", "*",     "00:00", "24:00", "VG-HANDOVER"],
+    ["5a1b2c3d", "*",     "00:00", "24:00", "ignore"]
+  ],
+  "commits": {"86a1eeb0": "HICMR-QA", "b43ebf63": "SUP-650", "wip:volunteering-gateway": "VG-HANDOVER"}
+}
 ```
 
-For each modified/untracked path, check its mtime falls inside the window (`find <path> -newermt "<start>" ! -newermt "<end>"` or `stat`). Include uncommitted work only for windows covering **today** — old uncommitted mtimes are unreliable history. Attribute it to a ticket only by the same rules as commits (current branch name key); otherwise it goes to Others, labeled as uncommitted/WIP.
-
-### What to ignore
-
-- Commits outside the window, other authors' commits (even on ticket branches)
-- Files under `.git/`, dependency dirs, build output
-- Previously generated reports (`daily-reports/`) — never let past output become evidence
-- Nothing else: when in doubt, include the evidence and let the report reflect it
-
-## Step 3 — Group by ticket
-
-Ticket keys match `\b[A-Z][A-Z0-9]+-\d+\b` (covers `VG-123`, `PBI-18261`). Scan commit subjects, bodies, and branch names.
-
-Attribution, in order:
-
-1. **Key in the commit message** → that ticket.
-2. **No key in the message** → run `git branch --all --contains <sha>` and ignore remote duplicates of the same branch. If the commit is contained ONLY in branches whose names carry a ticket key, and exactly one distinct key appears across them → that ticket. This captures unmerged WIP on a ticket branch. If the commit is also contained in any keyless-named branch (`main`, `master`, `develop`, …) its provenance is unknowable → rule 3.
-3. **Otherwise** → the `Others` section. Never guess a ticket for a keyless commit — wrong attribution is worse than an honest Others entry. Wrong attribution also corrupts the time estimate, since the commit's timestamp joins the ticket's sessions.
+- Session rule: `[session id prefix, MM-DD or "*", from HH:MM, to HH:MM, activity]`. `from` is inclusive and `to` is exclusive. The first matching rule wins, so put time-sliced rules before the catch-all for the same session.
+- Events that no rule matches are dropped, and `hours` lists their sessions at the end. Map them or confirm they should be ignored.
+- Activity key, in order of preference:
+  1. A ticket key from the commit, its branch, or a prompt that names the ticket ("check ticket CIP-323").
+  2. Otherwise a short project-and-theme key, e.g. `VG-HANDOVER`, `HICMR-OPS` or `SSH-VULN-CHECK`. These keys are internal: the report shows `—` and a descriptive title instead.
+- One key per piece of work. A session that changes topic gets one time slice per topic.
+- Map every commit. `hours` refuses to run while any commit is unmapped. Use `"ignore"` for commits that are not work.
+- Map sessions that only generated reports, or were idle chat, to `"ignore"`.
+- `workday_hours` defaults to 7.5. Change it only when the user gives a different workday.
 
 ## Step 4 — Resolve ticket titles
 
-For each ticket key:
+If Jira or Azure DevOps tools are available, look up every ticket key's summary in one search. Otherwise derive the title from the most representative commit or prompt. Never block the report on a missing integration.
 
-1. **If the session has Jira or Azure DevOps access** — MCP tools with jira/azure/devops in their names, or a working `az boards`/jira CLI — look up the real ticket summary/title. Use branch-linked tickets to confirm the match.
-2. **Otherwise (or if lookup fails)** → derive the title from the ticket's most representative commit message: strip the conventional-commit prefix (`feat(VG-123):`, `fix:`) and the ticket key, use what remains in sentence form.
+## Step 5 — Compute hours
 
-Never block the report on a missing integration — the fallback always works.
+```bash
+python3 <skill-dir>/scripts/dr.py hours <scratchpad>/evidence.json <scratchpad>/mapping.json
+```
 
-## Step 5 — Estimate time per ticket
+The script applies these rules. Restate them in the report's "How hours were estimated" section:
 
-For each ticket, per calendar date:
+1. Each activity's events per day are clustered. A gap over 60 min starts a new block, and each block counts first → last event + 30 min.
+2. A day over `workday_hours` is scaled down to it.
+3. A day under it that has commits is filled up to it: non-commit activities keep their raw time, and committed activities share the rest.
+4. Any other day keeps its raw time.
+5. Each activity is rounded to the nearest 0.5h, with a minimum of 0.5h. On a scaled or filled day, the largest activity absorbs the rounding difference so the day totals exactly `workday_hours`.
 
-1. Collect all its event timestamps (commits; WIP file mtimes for today).
-2. Sort; a gap over **60 minutes** starts a new session.
-3. Session duration = (last event − first event) + 30 minutes. Sum the sessions.
-4. Round to the nearest 5 minutes. Render as `[2h 30m]`, `[45m]`, `[1h]`.
-
-Same rule for the Others section. Do not editorialize the number up or down — the user adjusts it themselves; the value must be reproducible.
+Use the printed numbers as they are.
 
 ## Step 6 — Render
 
-Exact output shape — plain text, no markdown headers, no commit hashes, no file:line citations:
+The report is Markdown, in this exact shape:
 
-```
-November 21
-VG-123 - Login redirect fix [2h 30m]
-- Fixed token refresh race in auth interceptor
-- Added regression test for expired refresh token path
+````markdown
+# Work Report — <from> → <to> (git + server/ops activity)
 
-PBI-18261 - Invoice export corrections [1h 55m]
-- Corrected export date format
-- Extracted CSV writer into standalone module
+- **Author:** <git user.name>
+- **Workspace:** <workspace path>
+- **Generated:** <YYYY-MM-DD>
+- **Sources:** git (<N> commits across <R> repos) + Claude Code session logs (<S> sessions)
+- **Active days:** <D>
+- **Total estimated hours:** <T>h
 
-Others [30m]
-- Bumped dependencies
-```
+## How hours were estimated
 
-Rules:
+- <rules 1–5 from Step 5 in one bullet each, with the workday hours used>
+- Not captured: meetings, Slack/email, browser-only work, and terminal work outside Claude Code.
+- `[server]` marks work done on a remote server.
 
-- Date headers are plain `Month D` lines, one section per active date, chronological order. Omit dates with no activity.
-- Ticket line: `KEY - Title [Xh Ym]`. Others line: `Others [Xm]` (no dash title).
-- Bullets: brief, human, past-tense standup items synthesized from what changed — what a teammate understands. 1–6 bullets per ticket. Not a raw commit dump: merge trivially-related commits into one bullet, drop noise.
-- Blank line between ticket blocks.
-- For multi-day spans repeat the structure under each date; the same ticket may appear under several dates with that day's time only.
+## Summary
 
-Then:
+| Date | Commits | Server work | Est. Hours |
+|---|---|---|---|
+| 2026-11-04 Wed | 4 | yes | 7.5h |
+| **Total** | **25** | | **81h** |
 
-1. Print the report in chat.
-2. Save it to `<project shared dir>/daily-reports/<end-date-YYYY-MM-DD>-dr.md` per the Shared Workspace Artifacts contract (e.g. `~/Workspace/_shared/<project>/daily-reports/`), `mkdir -p` first. Tell the user the path.
+No evidence found for weekdays <list>.   ← omit this line when the list is empty
+
+## By Ticket / Activity
+
+| Ticket | Activity | Est. Hours |
+|---|---|---|
+| VG-710 | Link Checker | 14h |
+| — | HICMR testing environment restore and PHP upgrade | 5.5h |
+| **Total** | | **81h** |
+
+## Detail
+
+### 2026-11-04 — 7.5h
+
+**HICMR HARP 2 UAT fixes and data sync — 5.5h**
+- `10:55` **hicmr/hicmr-harp2-web** `86a1eeb0` fix(admin): show RA tool versions from the schema id
+- `[server]` Synced missing tool files from HICMR production to local and to staging/testing storage.
+
+**VEOHRCSLA-100 — Anonymous CRT reports — 1h**
+- Reviewed the CRT fix task list and hours; produced a per-task feasibility table.
+````
+
+Contract:
+
+- **Summary:** one row per active date, in chronological order, with the weekday. Weekends are included when there is evidence. The line after the table lists weekdays with no evidence.
+- **By Ticket / Activity:** sorted by hours, descending. The Ticket column is `—` when there is no key.
+- **Detail:** one `###` section per date. Each activity is a bold line, `**TICKET — Title — Xh**`, or `**Title — Xh**` when there is no real ticket, followed by:
+  - every commit verbatim as `` `HH:MM` **repo** `shortsha` subject ``
+  - 1–4 past-tense bullets synthesised from the prompts and `R` lines
+  - `[server]` at the start of any bullet whose work ran on a remote server
+- **Server names:** use the server's role ("VG production web-3", "HICMR staging host"). Never write IPs, usernames, key file names or credentials.
+- **Previous report:** if the user points to an earlier report for the same window, add a `Previous report` column to the Summary table and show the old totals beside the new ones in the header.
+
+## Step 7 — Deliver
+
+1. Save to `<workspace>/_shared/daily-reports/<from>-<to>.md`, running `mkdir -p` first. If the user named a location, or points to an earlier report, save next to it with a `-full` suffix. Never overwrite an existing report.
+2. For a window of 3 days or fewer, print the whole report in chat. For longer windows, print the Summary table, the total and the file path.
+3. Mention any credential warning from Step 2.
 
 ## Edge cases
 
-- **No activity in window** → say so plainly, don't fabricate. Suggest widening the range or checking the author filter.
-- **No ticket keys anywhere** → still render the report, everything under Others.
-- **Non-git directory** → fall back to file mtimes alone, everything under Others, and say the git evidence was unavailable.
-- **Window in the future / empty repo** → report empty; never invent content.
+- **No evidence in the window:** say so plainly and suggest a wider range or a different `--author`.
+- **No ticket keys anywhere:** render the report with `—` tickets and descriptive activities.
+- **No session logs:** the report is git-only. Say so in the Sources line.
 
 ## Common mistakes
 
-| Mistake | Correct behavior |
+| Mistake | Correct behaviour |
 |---|---|
-| Markdown `##` headers, commit hashes, `file.js:23` citations | Plain-text template exactly as shown — it's copy-pasted into report tools |
-| Attributing keyless commits to a plausible ticket | Others section; guessing misreports the user's day |
-| UTC day boundaries | Local timezone, always — overlapping days are the point |
-| Missing feature-branch work | `git log --all`, never just the current branch |
-| Including teammates' commits on shared branches | Author-filter to the user by default |
-| Precise-looking times (`2h 37m` from thin air) | The session-clustering rule, reproducibly; it's an estimate |
-| Dumping one bullet per commit | Synthesize: brief items of what was accomplished |
+| Scanning only the current repository | `collect` scans the whole workspace, so run it from anywhere |
+| Reporting only commits | Session prompts and `R` lines are evidence; server work gets `[server]` bullets |
+| Hand-adjusting hours | Rerun `hours` with a better mapping; never edit the numbers |
+| Guessing a ticket for keyless work | Use a descriptive activity key with `—` as the ticket |
+| One bullet per prompt or command | Synthesise 1–4 bullets of what was achieved |
+| IPs, usernames or tokens in bullets | Server roles only; credentials are reported to the user, never written down |
