@@ -18,7 +18,9 @@ Core principles:
 
 - **Evidence or silence.** Every bullet traces to a commit or a session event. Never invent work to fill a day.
 - **Read-only.** Never write to, stage or commit in the user's repositories, and never touch a remote server while building the report.
-- **Reproducible hours.** `dr.py hours` computes every number. Never edit hours by hand.
+- **First-person outcome narrative.** The report should read like the user's own daily report: task accomplishments and outcomes, not assistant activity narration.
+- **No implementation noise by default.** Omit estimated hours, commit ids, branch names, commit timestamps, and repository-path evidence lines unless the user explicitly asks for them.
+- **Reproducible evidence mapping.** Use `dr.py hours` as an internal coverage check; do not surface its hour estimates unless requested.
 - **No secrets.** Never copy tokens, passwords, keys or server IPs into the report.
 
 ## Step 1 — Resolve the window
@@ -66,99 +68,88 @@ Read every `S` block and decide what work it was. Write `<scratchpad>/mapping.js
 - One key per piece of work. A session that changes topic gets one time slice per topic.
 - Map every commit. `hours` refuses to run while any commit is unmapped. Use `"ignore"` for commits that are not work.
 - Map sessions that only generated reports, or were idle chat, to `"ignore"`.
-- `workday_hours` defaults to 7.5. Change it only when the user gives a different workday.
+- `workday_hours` defaults to 7.5. It is only an input to the internal coverage calculation; do not show the resulting hours in the default report.
 
 ## Step 4 — Resolve ticket titles
 
 If Jira or Azure DevOps tools are available, look up every ticket key's summary in one search. Otherwise derive the title from the most representative commit or prompt. Never block the report on a missing integration.
 
-## Step 5 — Compute hours
+## Step 5 — Validate coverage internally
 
 ```bash
 python3 <skill-dir>/scripts/dr.py hours <scratchpad>/evidence.json <scratchpad>/mapping.json
 ```
 
-The script applies these rules. Restate them in the report's "How hours were estimated" section:
+Use the output as an internal completeness check: unmapped commits, unmapped session events, or activities that were accidentally merged. Fix the mapping and rerun until the evidence is fully accounted for or intentionally ignored.
 
-1. Each activity's events per day are clustered. A gap over 60 min starts a new block, and each block counts first → last event + 30 min.
-2. A day over `workday_hours` is scaled down to it.
-3. A day under it that has commits is filled up to it: non-commit activities keep their raw time, and committed activities share the rest.
-4. Any other day keeps its raw time.
-5. Each activity is rounded to the nearest 0.5h, with a minimum of 0.5h. On a scaled or filled day, the largest activity absorbs the rounding difference so the day totals exactly `workday_hours`.
-
-Use the printed numbers as they are.
+Do **not** copy the hour estimates into the default report. If the user explicitly asks for hours or a timesheet, use the printed numbers exactly and add only the hour columns/notes needed for that request.
 
 ## Step 6 — Render
 
-The report is Markdown, in this exact shape:
+The default report is a first-person, task-oriented Markdown report in this exact shape:
 
 ````markdown
-# Work Report — <from> → <to> (git + server/ops activity)
+# Work Report — <from> → <to>
 
 - **Author:** <git user.name>
-- **Workspace:** <workspace path>
 - **Generated:** <YYYY-MM-DD>
-- **Sources:** git (<N> commits across <R> repos) + Claude Code session logs (<S> sessions)
-- **Active days:** <D>
-- **Total estimated hours:** <T>h
-
-## How hours were estimated
-
-- <rules 1–5 from Step 5 in one bullet each, with the workday hours used>
-- Not captured: meetings, Slack/email, browser-only work, and terminal work outside Claude Code.
-- `[server]` marks work done on a remote server.
+- **Active work date:** <date or dates>
 
 ## Summary
 
-| Date | Commits | Server work | Est. Hours |
-|---|---|---|---|
-| 2026-11-04 Wed | 4 | yes | 7.5h |
-| **Total** | **25** | | **81h** |
-
-No evidence found for weekdays <list>.   ← omit this line when the list is empty
-
-## By Ticket / Activity
-
-| Ticket | Activity | Est. Hours |
+| Date | Work performed | Server changes |
 |---|---|---|
-| VG-710 | Link Checker | 14h |
-| — | HICMR testing environment restore and PHP upgrade | 5.5h |
-| **Total** | | **81h** |
+| 2026-11-27 Fri | PBI implementation, validation, PR updates, QA evidence cleanup, and board triage | None |
 
-## Detail
+No work evidence was found on <date> within the partial <time range> slice.   ← omit this line when empty
 
-### 2026-11-04 — 7.5h
+## Tasks Completed
 
-**HICMR HARP 2 UAT fixes and data sync — 5.5h**
-- `10:55` **hicmr/hicmr-harp2-web** `86a1eeb0` fix(admin): show RA tool versions from the schema id
-- `[server]` Synced missing tool files from HICMR production to local and to staging/testing storage.
+| Ticket | Task |
+|---|---|
+| — | Reviewed my assigned PBIs and organized QA handoff readiness |
+| PBI-18506 | Guarded staff-facing forms against stale server actions after deployment |
+| PBI-18300 | Implemented the staff card org-chart Team field |
 
-**VEOHRCSLA-100 — Anonymous CRT reports — 1h**
-- Reviewed the CRT fix task list and hours; produced a per-task feasibility table.
+## Detail — 2026-11-27
+
+**PBI readiness review and ticket triage**
+- Reviewed my assigned PBIs and identified which items were ready for QA handoff and which were still blocked or externally dependent.
+- Worked through the active tickets one at a time to avoid overlapping changes.
+
+**PBI-18300 — Staff card Team, Direct Reports and Work Phone fields**
+- Implemented the org-chart Team field on the staff card.
+- Fixed the org-unit cache wiring, validated the regression tests and required gates, and opened PR 27541 for review.
+
+**PBI-18506 — Stale page after deploy: guard staff-facing forms**
+- Moved the stale-deploy guard into shared code and applied it to the affected staff-facing actions.
+- Added regression coverage, passed the full test suite and build, and opened PR 27550.
 ````
 
 Contract:
 
-- **Summary:** one row per active date, in chronological order, with the weekday. Weekends are included when there is evidence. The line after the table lists weekdays with no evidence.
-- **By Ticket / Activity:** sorted by hours, descending. The Ticket column is `—` when there is no key.
-- **Detail:** one `###` section per date. Each activity is a bold line, `**TICKET — Title — Xh**`, or `**Title — Xh**` when there is no real ticket, followed by:
-  - every commit verbatim as `` `HH:MM` **repo** `shortsha` subject ``
-  - 1–4 past-tense bullets synthesised from the prompts and `R` lines
-  - `[server]` at the start of any bullet whose work ran on a remote server
+- Write as the user's own report. Use first-person possessive where helpful: “Reviewed my assigned PBIs…”, “Implemented…”, “Verified that I did not…”. Never write “the assistant”, “Reviewed only PBIs assigned to <name>…”, or other agent/activity-log narration.
+- Use past-tense accomplishment bullets. Focus on what was completed, what was validated, what PR/ticket was updated, and any remaining blocker.
+- The default report must omit estimated hours, hour-estimation explanations, commit ids, branch names, commit timestamps, repository-path evidence lines, and raw command lines. If the user explicitly asks for one of those details, include only the requested detail.
+- Ticket numbers, PR numbers, blocker names, and environment names may remain when they are useful handoff evidence.
+- **Summary:** one row per active date, in chronological order, with the weekday. Use `None` for server changes when no remote server or cloud environment was changed. The line after the table lists dates in the window with no evidence.
+- **Tasks Completed:** no hours column. Use the same ordering as Detail; chronological execution order is preferred unless the user asks for another grouping. The Ticket column is `—` when there is no key.
+- **Detail:** one `##` or `###` section per active date. Each activity is a bold line, `**TICKET — Title**`, or `**Title**` when there is no real ticket, followed by 1–4 first-person past-tense bullets synthesised from the prompts, commits, and `R` lines.
+- `[server]` at the start of any bullet whose work ran on a remote server.
 - **Server names:** use the server's role ("VG production web-3", "HICMR staging host"). Never write IPs, usernames, key file names or credentials.
-- **Previous report:** if the user points to an earlier report for the same window, add a `Previous report` column to the Summary table and show the old totals beside the new ones in the header.
+- **Previous report:** if the user points to an earlier report for the same window, mention differences beside the new summary without restoring commit/branch/hour noise unless requested.
 
 ## Step 7 — Deliver
 
 1. Save to `<workspace>/_shared/daily-reports/<from>-<to>.md`, running `mkdir -p` first. If the user named a location, or points to an earlier report, save next to it with a `-full` suffix. Never overwrite an existing report.
-2. For a window of 3 days or fewer, print the whole report in chat. For longer windows, print the Summary table, the total and the file path.
+2. For a window of 3 days or fewer, print the whole report in chat. For longer windows, print the Summary table and the file path.
 3. Mention any credential warning from Step 2.
 
 ## Edge cases
 
 - **No evidence in the window:** say so plainly and suggest a wider range or a different `--author`.
 - **No ticket keys anywhere:** render the report with `—` tickets and descriptive activities.
-- **No session logs:** the report is git-only. Say so in the Sources line.
+- **No session logs:** the report is git-only. Mention that limitation in chat without adding implementation noise to the report.
 
 ## Common mistakes
 
@@ -166,7 +157,8 @@ Contract:
 |---|---|
 | Scanning only the current repository | `collect` scans the whole workspace, so run it from anywhere |
 | Reporting only commits | Session prompts and `R` lines are evidence; server work gets `[server]` bullets |
-| Hand-adjusting hours | Rerun `hours` with a better mapping; never edit the numbers |
+| Showing internal evidence noise by default | Keep commit ids, branch names, timestamps, repository paths, and hour estimates out unless the user explicitly asks for them |
+| Writing assistant narration | Write first-person user accomplishments such as “Implemented…” or “Reviewed my assigned PBIs…” |
 | Guessing a ticket for keyless work | Use a descriptive activity key with `—` as the ticket |
 | One bullet per prompt or command | Synthesise 1–4 bullets of what was achieved |
 | IPs, usernames or tokens in bullets | Server roles only; credentials are reported to the user, never written down |
